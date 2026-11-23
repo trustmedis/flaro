@@ -242,6 +242,45 @@ export default function App() {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>Quick start example</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Backend publish via <code>@internal/realtime-server</code>, browser subscribe via{' '}
+            <code>@internal/realtime-client</code>. Replace <code>&lt;apiKey&gt;</code> from a new credential.
+          </p>
+          <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">{`// backend (Node.js / Worker) — publishes events
+import { RealtimeServer } from '@internal/realtime-server';
+
+const rt = new RealtimeServer({
+  baseUrl: 'https://${location.host}',
+  appId: '${mint.appId || 'app_...'}',
+  apiKey: '<apiKey>',
+});
+await rt.publish({
+  channel: 'public:demo',
+  event: 'order.updated',
+  data: { orderId: 42, status: 'shipped' },
+});
+
+// browser client — subscribes to channels over one WebSocket
+import { RealtimeClient } from '@internal/realtime-client';
+
+const client = new RealtimeClient({
+  url: 'https://${location.host}',
+  appId: '${mint.appId || 'app_...'}',
+  // your backend mints a short-lived subscriber token (HMAC, tokenSecret)
+  getToken: () => fetch('/api/realtime-token').then((r) => r.text()),
+});
+await client.connect();
+const ch = client.channel('public:demo');
+ch.on('order.updated', (data) => console.log('received', data));
+await ch.subscribe();
+// → { orderId: 42, status: 'shipped' } arrives when publish() runs`}</pre>
+          <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(document.querySelector('pre')?.textContent ?? ''); toast('Copied'); }}>Copy</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Audit log</CardTitle></CardHeader>
         <CardContent>
           <Table>
