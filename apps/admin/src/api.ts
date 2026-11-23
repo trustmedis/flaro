@@ -37,8 +37,21 @@ type TokenGetter = () => Promise<string | null>;
 let tokenGetter: TokenGetter | null = null;
 export const setTokenGetter = (g: TokenGetter | null) => { tokenGetter = g; };
 
+// The first requests on page load race ahead of Clerk: child effects run
+// before the App effect that registers the getter, and the session token
+// itself takes a moment to mint. Wait briefly so requests never leave
+// with an empty bearer.
+async function waitForToken(): Promise<string | null> {
+  for (let i = 0; i < 15; i++) {
+    const token = tokenGetter ? await tokenGetter() : null;
+    if (token) {return token;}
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+  }
+  return null;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = tokenGetter ? await tokenGetter() : null;
+  const token = await waitForToken();
   const headers = new Headers({ authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json' });
   new Headers(init?.headers).forEach((v, k) => { headers.set(k, v); });
   const res = await fetch(`/admin${path}`, { ...init, headers });
