@@ -245,37 +245,53 @@ export default function App() {
         <CardHeader><CardTitle>Quick start example</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Backend publish via <code>@internal/realtime-server</code>, browser subscribe via{' '}
-            <code>@internal/realtime-client</code>. Replace <code>&lt;apiKey&gt;</code> from a new credential.
+            Pusher-compatible — browser pakai <code>pusher-js</code>, backend pakai raw API call
+            dengan signature HMAC standar Pusher. <code>key</code> = appId, <code>secret</code> = tokenSecret.
           </p>
-          <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">{`// backend (Node.js / Worker) — publishes events
-import { RealtimeServer } from '@internal/realtime-server';
+          <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">{`// ——— browser: subscribe dengan pusher-js ———
+import Pusher from 'pusher-js';
 
-const rt = new RealtimeServer({
-  baseUrl: 'https://${location.host}',
-  appId: '${mint.appId || 'app_...'}',
-  apiKey: '<apiKey>',
-});
-await rt.publish({
-  channel: 'public:demo',
-  event: 'order.updated',
-  data: { orderId: 42, status: 'shipped' },
+const pusher = new Pusher('${mint.appId || 'app_...'}', {
+  wsHost: '${location.host}',
+  wssPort: 443,
+  forceTLS: true,
+  enabledTransports: ['ws', 'wss'],
+  disableStats: true,
+  cluster: 'x',
 });
 
-// browser client — subscribes to channels over one WebSocket
-import { RealtimeClient } from '@internal/realtime-client';
-
-const client = new RealtimeClient({
-  url: 'https://${location.host}',
-  appId: '${mint.appId || 'app_...'}',
-  // your backend mints a short-lived subscriber token (HMAC, tokenSecret)
-  getToken: () => fetch('/api/realtime-token').then((r) => r.text()),
+const channel = pusher.subscribe('loket_semua_1');
+channel.bind('my-event', (data) => {
+  const json = JSON.parse(data.message);
+  console.log('received', json.antrian_nourut);
 });
-await client.connect();
-const ch = client.channel('public:demo');
-ch.on('order.updated', (data) => console.log('received', data));
-await ch.subscribe();
-// → { orderId: 42, status: 'shipped' } arrives when publish() runs`}</pre>
+
+// ——— backend: publish via raw API call (Node.js) ———
+import { createHash, createHmac } from 'node:crypto';
+
+const APP_ID = '${mint.appId || 'app_...'}';
+const SECRET = '<tokenSecret>'; // dari Manage app → token secret
+
+async function publish(channel, event, payload) {
+  const body = JSON.stringify({ name: event, channel, data: JSON.stringify(payload) });
+  const q = new URLSearchParams({
+    auth_key: APP_ID,
+    auth_timestamp: String(Math.floor(Date.now() / 1000)),
+    auth_version: '1.0',
+    body_md5: createHash('md5').update(body).digest('hex'),
+  });
+  q.sort();
+  const str = 'POST\\n/apps/' + APP_ID + '/events\\n' + q.toString();
+  q.set('auth_signature', createHmac('sha256', SECRET).update(str).digest('hex'));
+  const res = await fetch(\`https://${location.host}/apps/\${APP_ID}/events?\${q}\`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body,
+  });
+  if (!res.ok) throw new Error('publish failed: ' + res.status);
+}
+
+await publish('loket_semua_1', 'my-event', {
+  message: JSON.stringify({ antrian_nourut: 12, loket_nama: 'Loket 1' }),
+});`}</pre>
           <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(document.querySelector('pre')?.textContent ?? ''); toast('Copied'); }}>Copy</Button>
         </CardContent>
       </Card>
