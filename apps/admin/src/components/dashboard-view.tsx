@@ -25,10 +25,13 @@ import type { LiveStatsResponse } from '../api';
 const POLL_MS = 3000;
 const TIMELINE_MINUTES = 60;
 
-function toTimeline(buckets: Array<number>, key: string, now: number) {
-  return buckets.map((count, i) => ({
-    [key]: count,
+interface TimelineSeries { buckets: Array<number>; key: string }
+
+function toSeries(at: string, series: Array<TimelineSeries>) {
+  const now = new Date(at).getTime();
+  return (series[0]?.buckets ?? []).map((_, i) => ({
     t: new Date(now - (TIMELINE_MINUTES - 1 - i) * 60_000),
+    ...Object.fromEntries(series.map((s) => [s.key, s.buckets[i] ?? 0])),
   }));
 }
 
@@ -56,6 +59,35 @@ function MetricCard({ icon: Icon, label, tone, value }: {
           )}
           <div className="truncate text-muted-foreground text-sm">{label}</div>
         </div>
+      </CardPanel>
+    </Card>
+  );
+}
+
+function ChartCard({ data, description, series, title }: {
+  data: ReturnType<typeof toSeries>;
+  description: string;
+  series: Array<{ key: string; label: string }>;
+  title: string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+      </CardHeader>
+      <CardPanel>
+        <AreaChart
+          curve="monotone"
+          data={data}
+          height={200}
+          label={title}
+          palette={series.length > 1 ? 'categorical' : undefined}
+          series={series}
+          x="t"
+        />
       </CardPanel>
     </Card>
   );
@@ -139,46 +171,42 @@ export function DashboardView({ onError }: DashboardViewProps) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Events per minute</CardTitle>
-              <CardDescription>
-                Published events across all applications, last {TIMELINE_MINUTES} minutes.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardPanel>
-            <AreaChart
-              curve="monotone"
-              data={stats ? toTimeline(stats.totals.eventsTimeline, 'events', new Date(stats.at).getTime()) : []}
-              height={200}
-              label="Published events per minute"
-              series={[{ key: 'events', label: 'Events' }]}
-              x="t"
-            />
-          </CardPanel>
-        </Card>
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>New connections per minute</CardTitle>
-              <CardDescription>
-                Subscriber and Pusher connections opened, last {TIMELINE_MINUTES} minutes.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardPanel>
-            <AreaChart
-              curve="monotone"
-              data={stats ? toTimeline(stats.totals.connectionsTimeline, 'connections', new Date(stats.at).getTime()) : []}
-              height={200}
-              label="New connections per minute"
-              series={[{ key: 'connections', label: 'Connections' }]}
-              x="t"
-            />
-          </CardPanel>
-        </Card>
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.eventsTimeline, key: 'events' }]) : []}
+          description={`Published events across all applications, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'events', label: 'Events' }]}
+          title="Events per minute"
+        />
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.deliveredTimeline, key: 'delivered' }]) : []}
+          description={`Event frames fanned out to subscribers, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'delivered', label: 'Delivered' }]}
+          title="Delivered events per minute"
+        />
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.bandwidthInTimeline, key: 'in' }, { buckets: stats.totals.bandwidthOutTimeline, key: 'out' }]) : []}
+          description={`WebSocket bytes in and out of all applications, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'in', label: 'In' }, { key: 'out', label: 'Out' }]}
+          title="Bandwidth per minute (bytes)"
+        />
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.connectionsTimeline, key: 'connections' }]) : []}
+          description={`Subscriber and Pusher connections opened, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'connections', label: 'Connections' }]}
+          title="New connections per minute"
+        />
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.subscriptionsTimeline, key: 'subscriptions' }]) : []}
+          description={`Channel subscriptions created, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'subscriptions', label: 'Subscriptions' }]}
+          title="New subscriptions per minute"
+        />
+        <ChartCard
+          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.disconnectionsTimeline, key: 'disconnections' }]) : []}
+          description={`Connections closed or dropped, last ${TIMELINE_MINUTES} minutes.`}
+          series={[{ key: 'disconnections', label: 'Disconnections' }]}
+          title="Disconnections per minute"
+        />
       </div>
     </div>
   );

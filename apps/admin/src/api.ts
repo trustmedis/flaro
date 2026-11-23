@@ -13,19 +13,31 @@ export interface AuditEntry {
   metadata: string; timestamp: string;
 }
 export interface AppLiveStats {
+  bandwidthInTimeline: Array<number>; bandwidthOutTimeline: Array<number>;
   channels: number; connections: number; connectionsTimeline: Array<number>;
+  deliveredTimeline: Array<number>; disconnectionsTimeline: Array<number>;
   eventsPerMinute: number; eventsTimeline: Array<number>;
-  presenceMembers: number; subscribers: number;
+  presenceMembers: number; subscribers: number; subscriptionsTimeline: Array<number>;
 }
 export interface LiveApp {
   id: string; name: string; environment: string; status: string;
   live: AppLiveStats | null;
 }
+export interface LiveConnection {
+  appId: string; appName: string; environment: string;
+  channels: Array<string>; connId: string; connectedAt: number;
+  host: string; mode: string; sub: string; userAgent: string;
+}
+export interface ConnectionsResponse { at: string; connections: Array<LiveConnection> }
+
 export interface LiveStatsResponse {
   apps: Array<LiveApp>; at: string;
   totals: {
+    bandwidthInTimeline: Array<number>; bandwidthOutTimeline: Array<number>;
     channels: number; connections: number; connectionsTimeline: Array<number>;
-    eventsPerMinute: number; eventsTimeline: Array<number>; subscribers: number;
+    deliveredTimeline: Array<number>; disconnectionsTimeline: Array<number>;
+    eventsPerMinute: number; eventsTimeline: Array<number>;
+    subscribers: number; subscriptionsTimeline: Array<number>;
   };
 }
 
