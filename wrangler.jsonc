@@ -9,7 +9,32 @@
   "routes": [
     { "pattern": "flaro.trustmedis.net", "custom_domain": true }
   ],
-  "previews": {},
+  "previews": {
+    "vars": {
+      "CLERK_ISSUER": "https://wanted-eagle-57.clerk.accounts.dev"
+    },
+    "unsafe": {
+      "bindings": [
+        {
+          "name": "APP_DO",
+          "type": "durable_object_namespace",
+          "class_name": "ApplicationDO",
+          "namespace_id": "00060a24dccb448ea83d8221737ce0d7"
+        }
+      ]
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_id": "a3ee7ed0-685f-4bb2-926f-a85e8d2f2a58"
+      }
+    ],
+    "observability": {
+      "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true, "persist": true },
+      "traces": { "enabled": false, "head_sampling_rate": 1, "persist": true },
+      "issue_detection": { "enabled": false }
+    }
+  },
   "d1_databases": [
     {
       "binding": "DB",
