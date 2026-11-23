@@ -30,6 +30,11 @@ export interface LiveConnection {
 }
 export interface ConnectionsResponse { at: string; connections: Array<LiveConnection> }
 
+export interface ProbeResult {
+  delivered: number; eventId: string;
+  frames: { pusher: string; rth: string };
+}
+
 export interface LiveStatsResponse {
   apps: Array<LiveApp>; at: string;
   totals: {

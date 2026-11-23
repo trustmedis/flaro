@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { eq, desc } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { z } from 'zod';
+import { pusherFrame } from '@internal/realtime-protocol';
 import { applications, credentials, auditLog } from './db/schema';
 import { mintApiKey, randomToken, sha256Hex, AuthError } from './auth';
 import { verifyClerkAdminToken } from './clerk';
@@ -15,6 +16,12 @@ const createAppBody = z.object({
 const createCredentialBody = z.object({
   scopes: z.array(z.enum(['events:publish', 'connections:authorize', 'apps:read'])).min(1).default(['events:publish']),
   expiresInSeconds: z.number().int().positive().max(365 * 24 * 3600).optional(),
+});
+
+const probePublishBody = z.object({
+  channel: z.string().min(1).max(200),
+  event: z.string().min(1).max(200),
+  data: z.unknown().optional(),
 });
 
 async function audit(db: ReturnType<typeof drizzle>, actor: string, action: string, appId: string | null, metadata?: unknown) {
@@ -218,6 +225,30 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     }));
     connections.sort((a, b) => b.connectedAt - a.connectedAt);
     return c.json({ at: new Date().toISOString(), connections });
+  });
+
+  admin.post('/apps/:id/publish', async (c) => {
+    const body = probePublishBody.parse(await c.req.json());
+    const db = drizzle(c.env.DB);
+    const id = c.req.param('id');
+    const rows = await db.select({ id: applications.id }).from(applications).where(eq(applications.id, id)).limit(1);
+    if (!rows[0]) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
+    const stub = c.env.APP_DO.get(c.env.APP_DO.idFromName(id));
+    try {
+      const result = await stub.publishEvent(body.channel, body.event, body.data);
+      return c.json({
+        ...result,
+        frames: {
+          pusher: pusherFrame(body.event, body.channel, body.data),
+          rth: JSON.stringify({ type: 'event', eventId: result.eventId, channel: body.channel, event: body.event, data: body.data }),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'rate_limited') {
+        return c.json({ error: { code: 'rate_limited', message: 'publish rate limit reached' } }, 429);
+      }
+      throw error;
+    }
   });
 
   admin.get('/audit', async (c) => {
