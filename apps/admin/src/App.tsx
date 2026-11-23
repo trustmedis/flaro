@@ -70,7 +70,7 @@ export default function App() {
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; tlog('disconnected'); return; }
     const ws = new WebSocket(`${wsUrl}/v1/connect?token=${encodeURIComponent(test.token.trim())}`);
     ws.onopen = () => tlog('connected');
-    ws.onclose = (e) => tlog(`closed ${e.code}`);
+    ws.onclose = (e) => { tlog(`closed ${e.code}`); if (wsRef.current === ws) wsRef.current = null; };
     ws.onerror = () => tlog('socket error');
     ws.onmessage = (e) => { try { tlog(`<< ${JSON.stringify(JSON.parse(e.data))}`); } catch { tlog(`<< ${e.data}`); } };
     wsRef.current = ws;

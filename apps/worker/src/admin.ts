@@ -36,7 +36,7 @@ async function requireAdmin(c: { req: { header: (k: string) => string | undefine
   if (!auth?.startsWith('Bearer ')) throw new AuthError('forbidden', 'missing credentials', 403);
   const token = auth.slice(7).trim();
   const secret = c.env.ADMIN_SECRET;
-  if (secret && token === secret) return c.req.header('x-admin-actor') ?? 'admin';
+  if (secret && token === secret) return `secret:${c.req.header('x-admin-actor') ?? 'admin'}`;
   if (token.split('.').length === 3) {
     const payload = await verifyClerkAdminToken(c.env, token);
     return `clerk:${payload.sub ?? 'unknown'}`;
@@ -104,7 +104,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     await db.update(applications).set({ status: 'disabled', updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'app.disable', id);
     const stub = c.env.APP_DO.get(c.env.APP_DO.idFromName(id));
-    c.executionCtx.waitUntil(stub.disconnectAll('application disabled').catch(() => {}));
+    await stub.disconnectAll('application disabled');
     return c.json({ id, status: 'disabled' });
   });
 
@@ -114,6 +114,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
     if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
     const { keyId, secret, apiKey } = mintApiKey();
     const credId = `cred_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
     const now = new Date();
@@ -135,6 +136,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const rows = await db.select().from(credentials).where(eq(credentials.keyId, keyId)).limit(1);
     const cred = rows[0];
     if (!cred || cred.applicationId !== id) return c.json({ error: { code: 'not_found', message: 'credential not found' } }, 404);
+    if (cred.status !== 'active') return c.json({ error: { code: 'already_revoked', message: 'credential already revoked' } }, 409);
     await db.update(credentials).set({ status: 'revoked', revokedAt: new Date() }).where(eq(credentials.keyId, keyId));
     await audit(db, c.get('actor'), 'credential.revoke', id, { keyId });
     return c.json({ keyId, status: 'revoked' });
@@ -145,6 +147,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
     if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
     const tokenSecret = randomToken(32);
     await db.update(applications).set({ tokenSecret, updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'token_secret.rotate', id);
