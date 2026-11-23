@@ -17,5 +17,8 @@ class_name = "ApplicationDO"
 tag = "v1"
 new_sqlite_classes = ["ApplicationDO"]
 
+[vars]
+CLERK_ISSUER = "https://wanted-eagle-57.clerk.accounts.dev"
+
 [observability]
 enabled = true

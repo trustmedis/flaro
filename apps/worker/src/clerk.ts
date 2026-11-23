@@ -6,7 +6,7 @@ const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function isAdminPayload(p: JWTPayload): boolean {
   const meta = (p.public_metadata ?? p.publicMetadata) as Record<string, unknown> | undefined;
-  return p.role === 'admin' || p.org_role === 'admin' || meta?.role === 'admin';
+  return p.role === 'admin' || p.org_role === 'admin' || p.org_role === 'org:admin' || meta?.role === 'admin';
 }
 
 export async function verifyClerkAdminToken(env: Env, token: string): Promise<JWTPayload> {
