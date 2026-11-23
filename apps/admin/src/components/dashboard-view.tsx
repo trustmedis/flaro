@@ -64,9 +64,10 @@ function MetricCard({ icon: Icon, label, tone, value }: {
   );
 }
 
-function ChartCard({ data, description, series, title }: {
+function ChartCard({ data, description, formatValue, series, title }: {
   data: ReturnType<typeof toSeries>;
   description: string;
+  formatValue?: (value: number) => string;
   series: Array<{ key: string; label: string }>;
   title: string;
 }) {
@@ -82,6 +83,7 @@ function ChartCard({ data, description, series, title }: {
         <AreaChart
           curve="monotone"
           data={data}
+          formatValue={formatValue}
           height={200}
           label={title}
           palette={series.length > 1 ? 'categorical' : undefined}
@@ -91,6 +93,15 @@ function ChartCard({ data, description, series, title }: {
       </CardPanel>
     </Card>
   );
+}
+
+const MEGABYTE = 1_048_576;
+
+function formatMegabytes(value: number): string {
+  if (value === 0) {return '0 MB';}
+  if (value >= 10) {return `${value.toFixed(1)} MB`;}
+  if (value >= 0.1) {return `${value.toFixed(2)} MB`;}
+  return `${value.toPrecision(2)} MB`;
 }
 
 export function DashboardView({ onError }: DashboardViewProps) {
@@ -129,7 +140,7 @@ export function DashboardView({ onError }: DashboardViewProps) {
           Live
         </Badge>
         <span className="text-muted-foreground text-sm">
-          {stats ? `Updated ${new Date(stats.at).toLocaleTimeString()}` : 'Connecting…'}
+          {stats ? `Updated ${new Date(stats.at).toLocaleString()}` : 'Connecting…'}
         </span>
         <Button
           className="ms-auto"
@@ -184,10 +195,14 @@ export function DashboardView({ onError }: DashboardViewProps) {
           title="Delivered events per minute"
         />
         <ChartCard
-          data={stats ? toSeries(stats.at, [{ buckets: stats.totals.bandwidthInTimeline, key: 'in' }, { buckets: stats.totals.bandwidthOutTimeline, key: 'out' }]) : []}
-          description={`WebSocket bytes in and out of all applications, last ${TIMELINE_MINUTES} minutes.`}
+          data={stats ? toSeries(stats.at, [
+            { buckets: stats.totals.bandwidthInTimeline.map((v) => v / MEGABYTE), key: 'in' },
+            { buckets: stats.totals.bandwidthOutTimeline.map((v) => v / MEGABYTE), key: 'out' },
+          ]) : []}
+          description={`WebSocket megabytes in and out of all applications, last ${TIMELINE_MINUTES} minutes.`}
+          formatValue={formatMegabytes}
           series={[{ key: 'in', label: 'In' }, { key: 'out', label: 'Out' }]}
-          title="Bandwidth per minute (bytes)"
+          title="Bandwidth per minute (MB)"
         />
         <ChartCard
           data={stats ? toSeries(stats.at, [{ buckets: stats.totals.connectionsTimeline, key: 'connections' }]) : []}
