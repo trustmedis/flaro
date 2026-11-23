@@ -6,7 +6,21 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+minimumReleaseAgeExclude:
+  - '@cloudflare/oxlint-config@0.2.0'
+  - '@nkzw/oxlint-config@4.1.0'
 permissions:
+  '@cloudflare/oxlint-config':
+    skills: true
   everystate:
     build: true
     skills: true
+skills:
+  dirs:
+    - .agent/skills
+    - .agents/skills
+    - .claude/skills
+    - .cursor/skills
+    - .devin/skills
+    - .gemini/skills
+    - .github/skills
