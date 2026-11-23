@@ -1,0 +1,32 @@
+// Deploy-time config for Cloudflare Workers Builds, which runs
+// `npx wrangler preview` at the repo root. Mirrors apps/worker/wrangler.toml
+// with root-relative paths — keep the two in sync.
+{
+  "name": "realtime-hub",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "flaro.trustmedis.net", "custom_domain": true }
+  ],
+  "previews": {},
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "realtime-hub",
+      "database_id": "a3ee7ed0-685f-4bb2-926f-a85e8d2f2a58",
+      "migrations_dir": "apps/worker/migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "APP_DO", "class_name": "ApplicationDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ApplicationDO"] }
+  ],
+  "assets": { "directory": "apps/admin/dist" },
+  "vars": { "CLERK_ISSUER": "https://wanted-eagle-57.clerk.accounts.dev" },
+  "observability": { "enabled": true }
+}
