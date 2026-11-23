@@ -1,4 +1,4 @@
-import type { ApplicationDO } from './do/ApplicationDO';
+import type { ApplicationDO } from './do/application-do';
 
 export interface Env {
   DB: D1Database;

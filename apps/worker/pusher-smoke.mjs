@@ -19,7 +19,14 @@ const client = new PusherClient(APP, {
 });
 
 const done = (ok, msg) => { console.log(ok ? `RESULT: ok — ${msg}` : `RESULT: fail — ${msg}`); process.exit(ok ? 0 : 1); };
-setTimeout(() => done(false, 'watchdog timeout'), 15000);
+setTimeout(() => done(false, 'watchdog timeout'), 15_000);
+
+const triggerAll = async () => {
+  await server.trigger('public-demo', 'my-event', { hello: 'world' });
+  await server.trigger('private-queue', 'priv-ev', { n: 1 });
+  const chans = await server.get({ path: '/channels' });
+  console.log('[ok] channels:', JSON.stringify(chans.channels ?? chans));
+};
 
 client.connection.bind('connected', () => {
   console.log('[ok] connected', client.connection.socket_id);
@@ -29,12 +36,7 @@ client.connection.bind('connected', () => {
   const priv = client.subscribe('private-queue');
   priv.bind('pusher:subscription_error', (e) => console.log('[x] private-queue err', JSON.stringify(e)));
   priv.bind('pusher:subscription_succeeded', () => console.log('[ok] subscribed private-queue'));
-  setTimeout(async () => {
-    await server.trigger('public-demo', 'my-event', { hello: 'world' });
-    await server.trigger('private-queue', 'priv-ev', { n: 1 });
-    const chans = await server.get({ path: '/channels' });
-    console.log('[ok] channels:', JSON.stringify(chans.channels ?? chans));
-  }, 800);
+  setTimeout(() => { void triggerAll(); }, 800);
 });
 client.connection.bind('error', (e) => done(false, `connection error ${JSON.stringify(e)}`));
 client.connection.bind('failed', (e) => done(false, `connection failed ${JSON.stringify(e)}`));

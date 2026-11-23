@@ -12,10 +12,10 @@ export async function verifyPusherSignature(env: Env, method: string, appId: str
   const signature = q.get('auth_signature');
   const key = q.get('auth_key');
   const timestamp = q.get('auth_timestamp');
-  if (!signature || !key || !timestamp) throw new AuthError('invalid_auth', 'missing pusher auth params', 401);
-  if (key !== appId) throw new AuthError('invalid_auth', 'auth_key does not match app id', 401);
+  if (!signature || !key || !timestamp) {throw new AuthError('invalid_auth', 'missing pusher auth params', 401);}
+  if (key !== appId) {throw new AuthError('invalid_auth', 'auth_key does not match app id', 401);}
   const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - Number(timestamp)) > 600) throw new AuthError('invalid_auth', 'stale timestamp', 401);
+  if (Math.abs(now - Number(timestamp)) > 600) {throw new AuthError('invalid_auth', 'stale timestamp', 401);}
 
   if (method === 'POST' || method === 'PUT') {
     const bodyMd5 = q.get('body_md5');
@@ -28,8 +28,8 @@ export async function verifyPusherSignature(env: Env, method: string, appId: str
   const rows = await db.select({ tokenSecret: applications.tokenSecret, status: applications.status })
     .from(applications).where(eq(applications.id, appId)).limit(1);
   const app = rows[0];
-  if (!app) throw new AuthError('not_found', 'application not found', 404);
-  if (app.status !== 'active') throw new AuthError('app_disabled', 'application disabled', 410);
+  if (!app) {throw new AuthError('not_found', 'application not found', 404);}
+  if (app.status !== 'active') {throw new AuthError('app_disabled', 'application disabled', 410);}
 
   q.delete('auth_signature');
   const qs = [...q.entries()]
@@ -37,5 +37,5 @@ export async function verifyPusherSignature(env: Env, method: string, appId: str
     .map(([k, v]) => `${k}=${v}`)
     .join('&');
   const expected = await hmacSha256(app.tokenSecret, `${method}\n${url.pathname}\n${qs}`);
-  if (expected !== signature.toLowerCase()) throw new AuthError('invalid_auth', 'signature mismatch', 401);
+  if (expected !== signature.toLowerCase()) {throw new AuthError('invalid_auth', 'signature mismatch', 401);}
 }

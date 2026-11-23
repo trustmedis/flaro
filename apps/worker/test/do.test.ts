@@ -47,7 +47,7 @@ describe('ApplicationDO pusher protocol', () => {
     expect((await a.next()).event).toBe('pusher_internal:subscription_succeeded');
 
     const rot = await adminFetch(`/admin/apps/${app.id}/token-secret`, { method: 'POST' });
-    const { tokenSecret } = (await rot.json()) as { tokenSecret: string };
+    const { tokenSecret } = await rot.json<{ tokenSecret: string }>();
 
     const b = await pusherConnect(app.id); // same DO instance, ws1 still open
     const sig2 = await hmacHex(tokenSecret, `${b.connId}:private-rot2`);

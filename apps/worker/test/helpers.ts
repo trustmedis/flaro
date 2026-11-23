@@ -53,17 +53,17 @@ export function newPusher(): PusherClient {
 }
 
 export function getRandomName(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
 }
 
 export function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((r) => { setTimeout(r, ms); });
 }
 
 export async function waitsFor(cond: () => boolean, desc: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${desc}`);
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${desc}`);}
     await delay(50);
   }
 }
@@ -81,7 +81,7 @@ const TEST_ADMIN_SECRET = (() => {
   try {
     const dv = readFileSync(path.join(import.meta.dirname, '..', '.dev.vars'), 'utf8');
     const m = dv.match(/^ADMIN_SECRET=(.+)$/m);
-    if (m?.[1]) return m[1].trim();
+    if (m?.[1]) {return m[1].trim();}
   } catch { /* .dev.vars may not exist yet */ }
   return process.env.PUSHER_TEST_ADMIN_SECRET ?? 'pusher-compat-admin-secret';
 })();
@@ -101,7 +101,7 @@ export interface CreatedApp { id: string; tokenSecret: string }
 
 export async function createApp(): Promise<CreatedApp> {
   const res = await adminFetch('/admin/apps', { method: 'POST', body: JSON.stringify({ name: 't', environment: 'dev' }) });
-  return res.json() as Promise<CreatedApp>;
+  return res.json<CreatedApp>();
 }
 
 export async function hmacHex(secret: string, data: string): Promise<string> {
@@ -113,18 +113,18 @@ export async function hmacHex(secret: string, data: string): Promise<string> {
 export interface PusherConn {
   ws: WebSocket;
   connId: string;
-  send: (o: object) => void;
+  send: (o: unknown) => void;
   next: (timeoutMs?: number) => Promise<Record<string, unknown>>;
 }
 
 export async function pusherConnect(appId: string): Promise<PusherConn> {
   const ws = new WebSocket(`${WS_BASE}/app/${appId}`);
-  const inbox: Record<string, unknown>[] = [];
-  const waiters: ((m: Record<string, unknown>) => void)[] = [];
+  const inbox: Array<Record<string, unknown>> = [];
+  const waiters: Array<(m: Record<string, unknown>) => void> = [];
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(String(e.data)) as Record<string, unknown>;
     const w = waiters.shift();
-    if (w) w(m); else inbox.push(m);
+    if (w) {w(m);} else {inbox.push(m);}
   });
   const next = (timeoutMs = 2000) =>
     new Promise<Record<string, unknown>>((resolve, reject) => {

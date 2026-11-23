@@ -3,14 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @internal/worker dev",
+    "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build && pnpm --filter @internal/worker db:migrate",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "deploy:worker": "pnpm --filter @internal/worker run deploy"
   },
   "devDependencies": {
+    "@cloudflare/oxlint-config": "^0.1.0",
     "everystate": "0.4.1",
+    "oxlint": "^1.94.0",
+    "tsrs": "7.1.0-beta.tsrs4",
     "typescript": "5.9.3"
   }
 }

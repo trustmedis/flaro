@@ -1,4 +1,5 @@
-import { serverMessage, type EventMessage } from '@internal/realtime-protocol';
+import { serverMessage } from '@internal/realtime-protocol';
+import type { EventMessage, JsonValue } from '@internal/realtime-protocol';
 
 export type ConnectionState =
   | 'idle'
@@ -25,10 +26,10 @@ interface ChannelRecord {
   wanted: boolean;
 }
 
-export class Channel<TEvents extends Record<string, unknown> = Record<string, unknown>> {
+export class Channel<TEvents extends Record<string, JsonValue> = Record<string, JsonValue>> {
   private client: RealtimeClient;
   readonly name: string;
-  private handlers = new Map<string, Set<(data: never, ev: EventMessage) => void>>();
+  private handlers = new Map<string, Set<(data: unknown, ev: EventMessage) => void>>();
   subscribed = false;
 
   constructor(client: RealtimeClient, name: string) {
@@ -38,10 +39,11 @@ export class Channel<TEvents extends Record<string, unknown> = Record<string, un
 
   on<K extends keyof TEvents & string>(event: K, handler: (data: TEvents[K], ev: EventMessage) => void): () => void {
     let set = this.handlers.get(event);
-    if (!set) this.handlers.set(event, (set = new Set()));
-    const wrapped = handler as (data: never, ev: EventMessage) => void;
+    if (!set) {this.handlers.set(event, (set = new Set()));}
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the Set erases the per-event payload type; K ties payload to event name at this boundary
+    const wrapped = handler as (data: unknown, ev: EventMessage) => void;
     set.add(wrapped);
-    return () => set!.delete(wrapped);
+    return () => set.delete(wrapped);
   }
 
   async subscribe(): Promise<void> {
@@ -54,15 +56,15 @@ export class Channel<TEvents extends Record<string, unknown> = Record<string, un
 
   dispatch(ev: EventMessage): void {
     const set = this.handlers.get(ev.event);
-    if (!set) return;
-    for (const h of [...set]) {
-      try { h(ev.data as never, ev); } catch { /* listener errors must not break dispatch */ }
+    if (!set) {return;}
+    for (const h of set) {
+      try { h(ev.data, ev); } catch { /* listener errors must not break dispatch */ }
     }
   }
 
   get handlerCount(): number {
     let n = 0;
-    for (const s of this.handlers.values()) n += s.size;
+    for (const s of this.handlers.values()) {n += s.size;}
     return n;
   }
 
@@ -84,6 +86,7 @@ export class RealtimeClient {
   private reconnectAttempts = 0;
   private explicitDisconnect = false;
   private connectPromise: Promise<void> | null = null;
+  private channelCache = new Map<string, Channel>();
 
   constructor(opts: RealtimeClientOptions) {
     const url = opts.url.replace(/\/+$/, '');
@@ -103,32 +106,31 @@ export class RealtimeClient {
   }
 
   private setState(s: ConnectionState): void {
-    if (this.stateValue === s) return;
+    if (this.stateValue === s) {return;}
     this.stateValue = s;
-    for (const fn of [...this.stateListeners]) {
+    for (const fn of this.stateListeners) {
       try { fn(s); } catch { /* ignore */ }
     }
   }
 
-  channel<T extends Record<string, unknown> = Record<string, unknown>>(name: string): Channel<T> {
-    let rec = this.channels.get(name) as ChannelRecord | undefined;
+  channel<T extends Record<string, JsonValue> = Record<string, JsonValue>>(name: string): Channel<T> {
+    let rec = this.channels.get(name);
     if (!rec) {
       rec = { name, subscribed: false, wanted: false };
       this.channels.set(name, rec);
     }
-    const existing = (this as unknown as { _channelCache?: Map<string, Channel> })._channelCache;
-    const cache = existing ?? ((this as unknown as { _channelCache: Map<string, Channel> })._channelCache = new Map());
-    let ch = cache.get(name) as Channel<T> | undefined;
+    let ch = this.channelCache.get(name);
     if (!ch) {
       ch = new Channel<T>(this, name);
-      cache.set(name, ch);
+      this.channelCache.set(name, ch);
     }
-    return ch;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the cache erases the per-channel event map; T only shapes on() callbacks
+    return ch as Channel<T>;
   }
 
   async connect(): Promise<void> {
-    if (this.ws && (this.stateValue === 'connected' || this.stateValue === 'connecting')) return;
-    if (this.connectPromise) return this.connectPromise;
+    if (this.ws && (this.stateValue === 'connected' || this.stateValue === 'connecting')) {return;}
+    if (this.connectPromise) {return this.connectPromise;}
     this.explicitDisconnect = false;
     this.connectPromise = this.doConnect().finally(() => { this.connectPromise = null; });
     return this.connectPromise;
@@ -185,29 +187,29 @@ export class RealtimeClient {
         this.pendingAcks.delete(msg.requestId);
         const rec = this.channels.get(msg.channel);
         if (msg.type === 'subscription.succeeded') {
-          if (rec) rec.subscribed = true;
+          if (rec) {rec.subscribed = true;}
           pending.resolve();
         } else {
-          if (rec) rec.subscribed = false;
+          if (rec) {rec.subscribed = false;}
           pending.reject(new Error(msg.error.message));
         }
       }
       return;
     }
     if (msg.type === 'connection.error') {
-      for (const [, p] of this.pendingAcks) p.reject(new Error(msg.error.message));
+      for (const [, p] of this.pendingAcks) {p.reject(new Error(msg.error.message));}
       this.pendingAcks.clear();
     }
   }
 
   private channelForRecord(rec: ChannelRecord): Channel | undefined {
-    return (this as unknown as { _channelCache?: Map<string, Channel> })._channelCache?.get(rec.name);
+    return this.channelCache.get(rec.name);
   }
 
   private onClose(): void {
     this.ws = null;
-    for (const rec of this.channels.values()) rec.subscribed = false;
-    for (const [, p] of this.pendingAcks) p.reject(new Error('connection closed'));
+    for (const rec of this.channels.values()) {rec.subscribed = false;}
+    for (const [, p] of this.pendingAcks) {p.reject(new Error('connection closed'));}
     this.pendingAcks.clear();
     if (this.explicitDisconnect) {
       this.setState('disconnected');
@@ -234,8 +236,8 @@ export class RealtimeClient {
     }, jitter);
   }
 
-  private send(msg: object): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error('not connected');
+  private send(msg: unknown): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {throw new Error('not connected');}
     this.ws.send(JSON.stringify(msg));
   }
 
@@ -252,21 +254,21 @@ export class RealtimeClient {
       });
       try {
         this.send(build(requestId));
-      } catch (e) {
+      } catch (error) {
         clearTimeout(timer);
         this.pendingAcks.delete(requestId);
-        reject(e instanceof Error ? e : new Error(String(e)));
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }
 
   async subscribeChannel(name: string): Promise<void> {
     const rec = this.channels.get(name);
-    if (!rec) throw new Error(`unknown channel ${name}; call channel() first`);
+    if (!rec) {throw new Error(`unknown channel ${name}; call channel() first`);}
     rec.wanted = true;
-    if (rec.subscribed) return;
+    if (rec.subscribed) {return;}
     const existing = this.pendingSubscribes.get(name);
-    if (existing) return existing;
+    if (existing) {return existing;}
     const p = (async () => {
       await this.ensureConnected();
       await this.requestAck(name, (requestId) => ({ type: 'subscribe', requestId, channel: name }));
@@ -278,16 +280,16 @@ export class RealtimeClient {
 
   async unsubscribeChannel(name: string): Promise<void> {
     const rec = this.channels.get(name);
-    if (!rec) return;
+    if (!rec) {return;}
     rec.wanted = false;
-    if (!rec.subscribed && !this.pendingSubscribes.has(name)) return;
+    if (!rec.subscribed && !this.pendingSubscribes.has(name)) {return;}
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { rec.subscribed = false; return; }
     this.send({ type: 'unsubscribe', requestId: `req_${++this.reqCounter}`, channel: name });
     rec.subscribed = false;
   }
 
   private async ensureConnected(): Promise<void> {
-    if (this.stateValue === 'connected' && this.ws?.readyState === WebSocket.OPEN) return;
+    if (this.stateValue === 'connected' && this.ws?.readyState === WebSocket.OPEN) {return;}
     if (this.stateValue === 'connecting' || this.stateValue === 'reconnecting') {
       await new Promise<void>((resolve, reject) => {
         const off = this.onStateChange((s) => {
@@ -302,7 +304,7 @@ export class RealtimeClient {
 
   private async resubscribeAll(): Promise<void> {
     for (const [name, rec] of this.channels) {
-      if (!rec.wanted || rec.subscribed || this.pendingSubscribes.has(name)) continue;
+      if (!rec.wanted || rec.subscribed || this.pendingSubscribes.has(name)) {continue;}
       try {
         await this.requestAck(name, (requestId) => ({ type: 'subscribe', requestId, channel: name }));
         rec.subscribed = true;
@@ -316,7 +318,7 @@ export class RealtimeClient {
     const ws = this.ws;
     this.ws = null;
     try { ws?.close(1000, 'client disconnect'); } catch { /* ignore */ }
-    for (const rec of this.channels.values()) rec.subscribed = false;
+    for (const rec of this.channels.values()) {rec.subscribed = false;}
     this.setState('disconnected');
   }
 }

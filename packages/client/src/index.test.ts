@@ -6,13 +6,13 @@ const READY = { type: 'connection.ready', connectionId: 'conn_1', protocol: 1 };
 class FakeWebSocket {
   static OPEN = 1;
   static CLOSED = 3;
-  static instances: FakeWebSocket[] = [];
+  static instances: Array<FakeWebSocket> = [];
   static latest(): FakeWebSocket {
-    return this.instances[this.instances.length - 1]!;
+    return this.instances.at(-1)!;
   }
   readyState = 0;
   readonly url: string;
-  sent: string[] = [];
+  sent: Array<string> = [];
   private listeners = new Map<string, Set<(e: unknown) => void>>();
   constructor(url: string) {
     this.url = url;
@@ -20,7 +20,7 @@ class FakeWebSocket {
   }
   addEventListener(type: string, fn: (e: unknown) => void) {
     let set = this.listeners.get(type);
-    if (!set) this.listeners.set(type, (set = new Set()));
+    if (!set) {this.listeners.set(type, (set = new Set()));}
     set.add(fn);
   }
   removeEventListener(type: string, fn: (e: unknown) => void) {
@@ -50,7 +50,7 @@ class FakeWebSocket {
     this.fire('close', { code });
   }
   private fire(type: string, ev: unknown) {
-    for (const fn of [...(this.listeners.get(type) ?? [])]) fn(ev);
+    for (const fn of this.listeners.get(type) ?? []) {fn(ev);}
   }
 }
 
@@ -95,7 +95,7 @@ describe('RealtimeClient', () => {
     await client.unsubscribeChannel('dropped');
 
     ws1.drop();
-    await vi.advanceTimersByTimeAsync(1_500); // fire the reconnect timer
+    await vi.advanceTimersByTimeAsync(1500); // fire the reconnect timer
     await tick();
     const ws2 = FakeWebSocket.latest();
     expect(ws2).not.toBe(ws1);
@@ -118,7 +118,7 @@ describe('RealtimeClient', () => {
     const ws1 = await connectAndReady(client);
     ws1.drop();
 
-    await vi.advanceTimersByTimeAsync(1_500); // timer fires → connect() starts attempt
+    await vi.advanceTimersByTimeAsync(1500); // timer fires → connect() starts attempt
     await tick();
     const ws2 = FakeWebSocket.latest();
     expect(ws2).not.toBe(ws1);

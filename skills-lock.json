@@ -351,6 +351,13 @@
       "skillPath": "skills/show-me-your-work/SKILL.md",
       "computedHash": "ec213956e5cb2f5f6f5d814c943d83e4fd8d865417d44acfba9355a2e2e1a192"
     },
+    "siteplane-ui": {
+      "source": "ui.siteplane.io",
+      "sourceUrl": "https://ui.siteplane.io",
+      "sourceType": "well-known",
+      "computedHash": "14a3844a71bd83cd5d510e66e4154cf7c4283e8fffce3d28b73536573ea4289d",
+      "wellKnownDigest": "sha256:9440a400f9ebdb0e6537e0bba36bdadb8987b111bbd03e07e1d277d6b509db91"
+    },
     "statechart": {
       "source": "backnotprop/pstack",
       "commit": "83a729a182a29b59a2a42fc3d7736b0c376b55d4",

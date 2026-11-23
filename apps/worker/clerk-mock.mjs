@@ -13,7 +13,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ keys: [jwk] }));
   } else { res.writeHead(404); res.end(); }
 });
-server.listen(8899, async () => {
+async function printTokens() {
   const adminToken = await new SignJWT({ role: 'admin' })
     .setProtectedHeader({ alg: 'RS256', kid: 'test-key-1', typ: 'JWT' })
     .setIssuer('http://127.0.0.1:8899')
@@ -30,4 +30,5 @@ server.listen(8899, async () => {
     .setExpirationTime('5m')
     .sign(privateKey);
   console.log('TOKEN=' + token);
-});
+}
+server.listen(8899, () => { void printTokens(); });
