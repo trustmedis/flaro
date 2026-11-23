@@ -1,0 +1,203 @@
+import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Toaster } from '@/components/ui/sonner';
+import { api, getToken, setToken, mintSubscriberToken, type AdminApp, type Credential, type AuditEntry } from './api';
+
+function SecretDialog({ open, onClose, title, value }: { open: boolean; onClose: () => void; title: string; value: string }) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">Shown once — store it somewhere safe.</p>
+        <code className="block break-all rounded bg-muted p-3 text-sm">{value}</code>
+        <Button onClick={() => { navigator.clipboard.writeText(value); toast('Copied'); }}>Copy</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export default function App() {
+  const [authed, setAuthed] = useState(!!getToken());
+  const [tokenInput, setTokenInput] = useState('');
+  const [apps, setApps] = useState<AdminApp[]>([]);
+  const [detail, setDetail] = useState<{ app: AdminApp; credentials: Credential[] } | null>(null);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [secret, setSecret] = useState<{ title: string; value: string } | null>(null);
+  const [newApp, setNewApp] = useState({ name: '', environment: 'dev' });
+  const [mint, setMint] = useState({ appId: '', secret: '', sub: 'user-1', channels: 'public:*', iss: '', ttl: '300' });
+  const [minted, setMinted] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      const d = await api<{ apps: AdminApp[] }>('/apps');
+      setApps(d.apps);
+      const a = await api<{ entries: AuditEntry[] }>('/audit');
+      setAudit(a.entries);
+    } catch (e) { toast.error(String(e)); if (e instanceof Error && /403|401/.test(e.message)) logout(); }
+  }, []);
+  useEffect(() => { if (authed) void refresh(); }, [authed, refresh]);
+
+  async function login() {
+    setToken(tokenInput.trim());
+    try { await api('/apps'); setAuthed(true); }
+    catch { setToken(''); toast.error('Invalid credentials'); }
+  }
+  function logout() { setToken(''); setAuthed(false); setDetail(null); }
+  const run = (fn: () => Promise<void>) => { fn().then(refresh).catch((e) => toast.error(String(e))); };
+
+  if (!authed) return (
+    <div className="flex min-h-screen items-center justify-center bg-muted/40">
+      <Card className="w-full max-w-sm">
+        <CardHeader><CardTitle>Realtime Hub Admin</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="tok">Admin credential</Label>
+          <Input id="tok" type="password" placeholder="ADMIN_SECRET or Clerk token"
+            value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && login()} />
+          <Button className="w-full" onClick={login}>Sign in</Button>
+          <p className="text-xs text-muted-foreground">Stored in sessionStorage only.</p>
+        </CardContent>
+      </Card>
+      <Toaster />
+    </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Realtime Hub Admin</h1>
+        <Button variant="outline" onClick={logout}>Sign out</Button>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle>Create application</CardTitle></CardHeader>
+        <CardContent className="flex gap-2">
+          <Input placeholder="name" value={newApp.name} onChange={(e) => setNewApp({ ...newApp, name: e.target.value })} />
+          <Input className="w-32" placeholder="env" value={newApp.environment} onChange={(e) => setNewApp({ ...newApp, environment: e.target.value })} />
+          <Button onClick={() => run(async () => {
+            const r = await api<{ id: string; tokenSecret: string }>('/apps', { method: 'POST', body: JSON.stringify(newApp) });
+            setSecret({ title: `tokenSecret for ${r.id}`, value: r.tokenSecret });
+            setNewApp({ name: '', environment: 'dev' });
+          })}>Create</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Applications</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Name</TableHead><TableHead>Env</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <TableBody>
+              {apps.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell className="font-mono text-xs">{a.id}</TableCell>
+                  <TableCell>{a.name}</TableCell>
+                  <TableCell>{a.environment}</TableCell>
+                  <TableCell><Badge variant={a.status === 'active' ? 'default' : 'destructive'}>{a.status}</Badge></TableCell>
+                  <TableCell className="space-x-2 text-right">
+                    <Button size="sm" variant="outline" onClick={() => run(async () => {
+                      setDetail(await api(`/apps/${a.id}`));
+                      setMint((m) => ({ ...m, appId: a.id }));
+                    })}>Manage</Button>
+                    {a.status === 'active' && (
+                      <Button size="sm" variant="destructive" onClick={() => run(async () => {
+                        await api(`/apps/${a.id}/disable`, { method: 'POST' });
+                      })}>Disable</Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {detail && (
+        <Card>
+          <CardHeader><CardTitle>{detail.app.id} — credentials</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Table>
+              <TableHeader><TableRow><TableHead>Key ID</TableHead><TableHead>Scopes</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
+              <TableBody>
+                {detail.credentials.map((c) => (
+                  <TableRow key={c.keyId}>
+                    <TableCell className="font-mono text-xs">{c.keyId}</TableCell>
+                    <TableCell>{c.scopes.join(', ')}</TableCell>
+                    <TableCell><Badge variant={c.status === 'active' ? 'default' : 'destructive'}>{c.status}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      {c.status === 'active' && <Button size="sm" variant="destructive" onClick={() => run(async () => {
+                        await api(`/apps/${detail.app.id}/credentials/${c.keyId}/revoke`, { method: 'POST' });
+                        setDetail(await api(`/apps/${detail.app.id}`));
+                      })}>Revoke</Button>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => run(async () => {
+                const r = await api<{ apiKey: string }>(`/apps/${detail.app.id}/credentials`, { method: 'POST', body: JSON.stringify({ scopes: ['events:publish'] }) });
+                setSecret({ title: 'New API key', value: r.apiKey });
+                setDetail(await api(`/apps/${detail.app.id}`));
+              })}>New credential</Button>
+              <Button size="sm" variant="outline" onClick={() => run(async () => {
+                const r = await api<{ tokenSecret: string }>(`/apps/${detail.app.id}/token-secret`, { method: 'POST' });
+                setSecret({ title: 'Rotated tokenSecret', value: r.tokenSecret });
+              })}>Rotate token secret</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader><CardTitle>Mint subscriber token</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3">
+          <Label className="col-span-2">appId<Input value={mint.appId} onChange={(e) => setMint({ ...mint, appId: e.target.value })} /></Label>
+          <Label className="col-span-2">tokenSecret<Input type="password" value={mint.secret} onChange={(e) => setMint({ ...mint, secret: e.target.value })} /></Label>
+          <Label>sub<Input value={mint.sub} onChange={(e) => setMint({ ...mint, sub: e.target.value })} /></Label>
+          <Label>channels (csv)<Input value={mint.channels} onChange={(e) => setMint({ ...mint, channels: e.target.value })} /></Label>
+          <Label>iss<Input placeholder={`${mint.appId || 'app'}-backend`} value={mint.iss} onChange={(e) => setMint({ ...mint, iss: e.target.value })} /></Label>
+          <Label>ttl (s, ≤300)<Input value={mint.ttl} onChange={(e) => setMint({ ...mint, ttl: e.target.value })} /></Label>
+          <Button className="col-span-2" onClick={() => run(async () => {
+            const t = await mintSubscriberToken(mint.secret, {
+              appId: mint.appId, sub: mint.sub,
+              channels: mint.channels.split(',').map((s) => s.trim()).filter(Boolean),
+              iss: mint.iss || `${mint.appId}-backend`, aud: 'realtime-hub', ttl: Number(mint.ttl),
+            });
+            setMinted(t);
+          })}>Mint</Button>
+          {minted && <code className="col-span-2 block break-all rounded bg-muted p-3 text-xs">{minted}</code>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Audit log</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Actor</TableHead><TableHead>Action</TableHead><TableHead>App</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {audit.map((e) => (
+                <TableRow key={e.id}>
+                  <TableCell className="text-xs">{new Date(e.timestamp).toLocaleString()}</TableCell>
+                  <TableCell className="text-xs">{e.actor}</TableCell>
+                  <TableCell>{e.action}</TableCell>
+                  <TableCell className="font-mono text-xs">{e.applicationId}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <SecretDialog open={!!secret} onClose={() => setSecret(null)} title={secret?.title ?? ''} value={secret?.value ?? ''} />
+      <Toaster />
+    </div>
+  );
+}
