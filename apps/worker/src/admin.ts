@@ -104,7 +104,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     await db.update(applications).set({ status: 'disabled', updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'app.disable', id);
     const stub = c.env.APP_DO.get(c.env.APP_DO.idFromName(id));
-    c.executionCtx.waitUntil(stub.disconnectAll('application disabled').catch(() => {}));
+    await stub.disconnectAll('application disabled');
     return c.json({ id, status: 'disabled' });
   });
 
@@ -114,6 +114,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
     if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
     const { keyId, secret, apiKey } = mintApiKey();
     const credId = `cred_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
     const now = new Date();
@@ -145,6 +146,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
     if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
     const tokenSecret = randomToken(32);
     await db.update(applications).set({ tokenSecret, updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'token_secret.rotate', id);
