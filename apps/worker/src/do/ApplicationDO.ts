@@ -26,6 +26,7 @@ interface ConnState {
   connId: string;
   subs: Set<string>;
   mode: 'rth' | 'pusher';
+  lastOp: Map<string, 'sub' | 'unsub'>;
 }
 
 const PUBLISH_LIMIT_PER_MINUTE = 600;
@@ -51,7 +52,7 @@ export class ApplicationDO extends DurableObject<Env> {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att || att.v !== 1) continue;
       if (!this.appId && att.appId) this.appId = att.appId;
-      const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth' };
+      const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth', lastOp: new Map() };
       this.conns.set(att.connId, state);
       for (const ch of att.subs) {
         let set = this.channelIndex.get(ch);
@@ -93,7 +94,7 @@ export class ApplicationDO extends DurableObject<Env> {
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
       this.ctx.acceptWebSocket(server);
       const connId = `conn_${crypto.randomUUID()}`;
-      const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'pusher' };
+      const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'pusher', lastOp: new Map() };
       this.conns.set(connId, state);
       this.indexBuilt = true;
       this.appId = appId;
@@ -112,7 +113,7 @@ export class ApplicationDO extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
 
     const connId = `conn_${crypto.randomUUID()}`;
-    const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'rth' };
+    const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'rth', lastOp: new Map() };
     this.conns.set(connId, state);
     this.indexBuilt = true;
     this.appId = parsed.appId;
@@ -180,6 +181,7 @@ export class ApplicationDO extends DurableObject<Env> {
     if (event === 'pusher:unsubscribe') {
       const d = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data as { channel?: string };
       const channel = d?.channel;
+      if (channel) state.lastOp.set(channel, 'unsub');
       if (channel && state.subs.delete(channel)) {
         this.channelIndex.get(channel)?.delete(state.connId);
         const att = state.ws.deserializeAttachment() as Attachment | null;
@@ -193,10 +195,12 @@ export class ApplicationDO extends DurableObject<Env> {
       if (!data.success) return this.pusherError(state, 'invalid subscribe data');
       const { channel, auth } = data.data;
       if (channel.startsWith('presence-')) return this.pusherError(state, 'presence channels are not supported');
+      state.lastOp.set(channel, 'sub');
       if (isPusherPrivateChannel(channel)) {
         if (!auth || !(await this.verifyChannelAuth(auth, channel, state.connId))) {
           return this.pusherError(state, `Could not find app for key ${channel.split('-')[0]}.`);
         }
+        if (this.conns.get(state.connId) !== state || state.lastOp.get(channel) !== 'sub') return;
       }
       if (state.subs.size >= MAX_SUBSCRIPTIONS_PER_CONNECTION && !state.subs.has(channel)) {
         return this.pusherError(state, 'too many subscriptions');
@@ -235,6 +239,7 @@ export class ApplicationDO extends DurableObject<Env> {
         error: { code, message },
       }));
 
+    state.lastOp.set(channel, 'sub');
     if (channel.startsWith('presence:')) return fail('unsupported', 'presence channels are not supported');
     if (isPrivateChannel(channel)) {
       const att = state.ws.deserializeAttachment() as Attachment | null;
@@ -249,6 +254,9 @@ export class ApplicationDO extends DurableObject<Env> {
         if (!ok) return fail('auth_failed', 'bad channel auth signature');
       } else if (!claimed) {
         return fail('forbidden', 'channel not allowed by token');
+      }
+      if (this.conns.get(state.connId) !== state || state.lastOp.get(channel) !== 'sub') {
+        return fail('superseded', 'request superseded by a newer one');
       }
     }
     if (state.subs.has(channel)) {
@@ -267,6 +275,7 @@ export class ApplicationDO extends DurableObject<Env> {
   }
 
   private handleUnsubscribe(state: ConnState, channel: string, requestId: string): void {
+    state.lastOp.set(channel, 'unsub');
     state.subs.delete(channel);
     this.channelIndex.get(channel)?.delete(state.connId);
     const att = state.ws.deserializeAttachment() as Attachment | null;
