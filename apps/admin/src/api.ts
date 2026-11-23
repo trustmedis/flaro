@@ -11,14 +11,18 @@ export interface AuditEntry {
   metadata: string; timestamp: string;
 }
 
-let token = sessionStorage.getItem('rth_admin') ?? '';
-export const setToken = (t: string) => { token = t; t ? sessionStorage.setItem('rth_admin', t) : sessionStorage.removeItem('rth_admin'); };
-export const getToken = () => token;
+type TokenGetter = () => Promise<string | null>;
+let tokenGetter: TokenGetter | null = null;
+export const setTokenGetter = (g: TokenGetter | null) => { tokenGetter = g; };
+
+let manualToken = sessionStorage.getItem('rth_admin') ?? '';
+export const setManualToken = (t: string) => { manualToken = t; t ? sessionStorage.setItem('rth_admin', t) : sessionStorage.removeItem('rth_admin'); };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = tokenGetter ? await tokenGetter() : manualToken;
   const res = await fetch(`/admin${path}`, {
     ...init,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error?.code ? `${data.error.code}: ${data.error.message}` : `HTTP ${res.status}`);

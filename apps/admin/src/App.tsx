@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
-import { api, getToken, setToken, mintSubscriberToken, type AdminApp, type Credential, type AuditEntry } from './api';
+import { useAuth, useUser, SignInButton, SignOutButton } from '@clerk/clerk-react';
+import { api, setTokenGetter, setManualToken, mintSubscriberToken, type AdminApp, type Credential, type AuditEntry } from './api';
 
 function SecretDialog({ open, onClose, title, value }: { open: boolean; onClose: () => void; title: string; value: string }) {
   return (
@@ -24,8 +25,20 @@ function SecretDialog({ open, onClose, title, value }: { open: boolean; onClose:
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(!!getToken());
+  const { isSignedIn, getToken, signOut } = useAuth();
+  const { user } = useUser();
+  const [manualAuthed, setManualAuthed] = useState(!!sessionStorage.getItem('rth_admin'));
+  const authed = isSignedIn || manualAuthed;
   const [tokenInput, setTokenInput] = useState('');
+  const [showManual, setShowManual] = useState(false);
+
+  useEffect(() => {
+    if (!isSignedIn) { setTokenGetter(null); return; }
+    setTokenGetter(async () => {
+      try { return await getToken({ template: 'realtime-admin' }); }
+      catch { return await getToken(); }
+    });
+  }, [isSignedIn, getToken]);
   const [apps, setApps] = useState<AdminApp[]>([]);
   const [detail, setDetail] = useState<{ app: AdminApp; credentials: Credential[] } | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -45,11 +58,14 @@ export default function App() {
   useEffect(() => { if (authed) void refresh(); }, [authed, refresh]);
 
   async function login() {
-    setToken(tokenInput.trim());
-    try { await api('/apps'); setAuthed(true); }
-    catch { setToken(''); toast.error('Invalid credentials'); }
+    setManualToken(tokenInput.trim());
+    try { await api('/apps'); setManualAuthed(true); }
+    catch { setManualToken(''); toast.error('Invalid credentials'); }
   }
-  function logout() { setToken(''); setAuthed(false); setDetail(null); }
+  function logout() {
+    if (isSignedIn) { void signOut(); }
+    setManualToken(''); setManualAuthed(false); setDetail(null);
+  }
   const run = (fn: () => Promise<void>) => { fn().then(refresh).catch((e) => toast.error(String(e))); };
 
   if (!authed) return (
@@ -57,12 +73,24 @@ export default function App() {
       <Card className="w-full max-w-sm">
         <CardHeader><CardTitle>Realtime Hub Admin</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <Label htmlFor="tok">Admin credential</Label>
-          <Input id="tok" type="password" placeholder="ADMIN_SECRET or Clerk token"
-            value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && login()} />
-          <Button className="w-full" onClick={login}>Sign in</Button>
-          <p className="text-xs text-muted-foreground">Stored in sessionStorage only.</p>
+          <SignInButton mode="modal">
+            <Button className="w-full">Sign in with Clerk</Button>
+          </SignInButton>
+          <p className="text-xs text-muted-foreground">
+            Requires a Clerk token with an admin claim (JWT template
+            <code> realtime-admin</code>, org role, or public_metadata.role).
+          </p>
+          <Button variant="link" className="h-auto p-0 text-xs" onClick={() => setShowManual(!showManual)}>
+            use manual credential
+          </Button>
+          {showManual && (<>
+            <Label htmlFor="tok">ADMIN_SECRET / token</Label>
+            <Input id="tok" type="password" value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && login()} />
+            <Button className="w-full" variant="outline" onClick={login}>Sign in</Button>
+            <p className="text-xs text-muted-foreground">Stored in sessionStorage only.</p>
+          </>)}
         </CardContent>
       </Card>
       <Toaster />
@@ -73,7 +101,12 @@ export default function App() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Realtime Hub Admin</h1>
-        <Button variant="outline" onClick={logout}>Sign out</Button>
+        <div className="flex items-center gap-3">
+          {isSignedIn && user && <span className="text-sm text-muted-foreground">{user.primaryEmailAddress?.emailAddress}</span>}
+          {isSignedIn
+            ? <SignOutButton><Button variant="outline">Sign out</Button></SignOutButton>
+            : <Button variant="outline" onClick={logout}>Sign out</Button>}
+        </div>
       </div>
 
       <Card>
