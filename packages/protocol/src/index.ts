@@ -126,6 +126,12 @@ export const pusherSubscribeData = z.object({
 });
 export type PusherSubscribeData = z.infer<typeof pusherSubscribeData>;
 
+export const pusherChannelData = z.object({
+  user_id: z.string().min(1).max(128),
+  user_info: z.unknown().optional(),
+});
+export type PusherChannelData = z.infer<typeof pusherChannelData>;
+
 // Pusher frames carry `data` as a JSON-encoded *string*.
 export function pusherFrame(event: string, channel: string | undefined, data: unknown): string {
   return JSON.stringify({ event, ...(channel !== undefined ? { channel } : {}), data: JSON.stringify(data ?? {}) });

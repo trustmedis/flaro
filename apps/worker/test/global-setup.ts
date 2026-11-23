@@ -1,32 +1,59 @@
-import { execSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const PORT = 8990;
+const PORT = Number(process.env.PUSHER_TEST_PORT ?? 8791);
+const ADMIN_SECRET = process.env.PUSHER_TEST_ADMIN_SECRET ?? 'pusher-compat-admin-secret';
 const BASE = `http://127.0.0.1:${PORT}`;
-let proc: ChildProcess | null = null;
 
-export async function setup(): Promise<void> {
-  const workerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  execSync('pnpm exec wrangler d1 migrations apply realtime-hub --local', { cwd: workerDir, stdio: 'inherit' });
-  proc = spawn('pnpm', ['exec', 'wrangler', 'dev', '--port', String(PORT), '--var', 'ADMIN_SECRET:test-admin-secret'], {
-    cwd: workerDir,
-    stdio: 'ignore',
-    detached: true,
-  });
-  const deadline = Date.now() + 45_000;
-  while (Date.now() < deadline) {
+export default async function setup() {
+  const workerDir = path.resolve(import.meta.dirname, '..');
+  const persistDir = path.join(workerDir, '.wrangler', 'pusher-compat-state');
+  rmSync(persistDir, { recursive: true, force: true });
+  mkdirSync(persistDir, { recursive: true });
+  const devVarsPath = path.join(workerDir, '.dev.vars');
+  const devVars = existsSync(devVarsPath) ? readFileSync(devVarsPath, 'utf8') : '';
+  if (!/^ADMIN_SECRET=.+/m.test(devVars)) {
+    writeFileSync(devVarsPath, `${devVars.replace(/\s*$/, '')}${devVars.trim() ? '\n' : ''}ADMIN_SECRET=${ADMIN_SECRET}\n`);
+  }
+
+  execFileSync(
+    'pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'realtime-hub', '--local', '--persist-to', persistDir],
+    { cwd: workerDir, stdio: 'inherit' },
+  );
+
+  const proc: ChildProcess = spawn(
+    'pnpm', ['exec', 'wrangler', 'dev', '--port', String(PORT), '--persist-to', persistDir],
+    { cwd: workerDir, stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+
+  const deadline = Date.now() + 60_000;
+  for (;;) {
     try {
-      const res = await fetch(`${BASE}/health`);
-      if (res.ok) return;
+      if ((await fetch(`${BASE}/health`)).ok) break;
     } catch { /* not up yet */ }
-    await new Promise((r) => setTimeout(r, 500));
+    if (Date.now() > deadline) {
+      proc.kill('SIGINT');
+      throw new Error('wrangler dev did not become healthy within 60s');
+    }
+    await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error('wrangler dev did not become healthy in 45s');
-}
 
-export async function teardown(): Promise<void> {
-  if (proc?.pid) {
-    try { process.kill(-proc.pid, 'SIGTERM'); } catch { proc.kill('SIGTERM'); }
-  }
+  const res = await fetch(`${BASE}/admin/apps`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${ADMIN_SECRET}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'pusher-compat', environment: 'test' }),
+  });
+  if (!res.ok) throw new Error(`create app failed: ${res.status} ${await res.text()}`);
+  const app = (await res.json()) as { id: string; tokenSecret: string };
+
+  writeFileSync(
+    path.join(workerDir, 'test', '.test-app.json'),
+    JSON.stringify({ appId: app.id, secret: app.tokenSecret, port: PORT }),
+  );
+
+  return async () => {
+    proc.kill('SIGINT');
+    rmSync(path.join(workerDir, 'test', '.test-app.json'), { force: true });
+  };
 }
