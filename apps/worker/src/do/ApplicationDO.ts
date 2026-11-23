@@ -215,7 +215,7 @@ export class ApplicationDO extends DurableObject<Env> {
     }
     if (event.startsWith('client-')) {
       const channel = raw.channel;
-      if (channel && state.subs.has(channel)) {
+      if (channel && isPusherPrivateChannel(channel) && state.subs.has(channel)) {
         const frame = pusherFrame(event, channel, raw.data);
         const targets = this.channelIndex.get(channel);
         if (targets) {
