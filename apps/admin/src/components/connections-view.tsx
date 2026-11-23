@@ -36,13 +36,6 @@ import {
   PaginationPrevious,
   PaginationStatus,
 } from '@/siteplane/components/pagination';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/siteplane/components/select';
 import { Separator } from '@/siteplane/components/separator';
 import {
   Table,
@@ -54,7 +47,7 @@ import {
 } from '@/siteplane/components/table';
 import { Textarea } from '@/siteplane/components/textarea';
 import { api } from '../api';
-import type { ConnectionsResponse, LiveConnection, ProbeResult } from '../api';
+import type { AppChannel, AppChannelsResponse, ConnectionsResponse, LiveConnection, ProbeResult } from '../api';
 
 const POLL_MS = 3000;
 const PAGE_SIZE = 10;
@@ -74,10 +67,15 @@ interface ConnectionsViewProps {
   onError: (message: string) => void;
 }
 
-function ProbePanel({ conn, onError }: { conn: LiveConnection; onError: (message: string) => void }) {
+function ProbePanel({ appChannels, conn, onError }: {
+  appChannels: Array<AppChannel>;
+  conn: LiveConnection;
+  onError: (message: string) => void;
+}) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<ProbeResult | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const channelOptions = [...new Set([...appChannels.map((c) => c.name), ...conn.channels])];
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -112,20 +110,18 @@ function ProbePanel({ conn, onError }: { conn: LiveConnection; onError: (message
       <Form className="flex flex-col gap-3" onSubmit={(event) => { void submit(event); }}>
         <Field name="channel">
           <FieldLabel>Channel</FieldLabel>
-          {conn.channels.length > 0 ? (
-            <Select defaultValue={conn.channels[0]} items={conn.channels.map((ch) => ({ value: ch, label: ch }))} name="channel">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup>
-                {conn.channels.map((ch) => (
-                  <SelectItem key={ch} value={ch}>{ch}</SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          ) : (
-            <Input name="channel" placeholder="channel-name" required />
-          )}
+          <Input
+            defaultValue={conn.channels[0] ?? ''}
+            list={`probe-channels-${conn.connId}`}
+            name="channel"
+            placeholder="channel-name"
+            required
+          />
+          <datalist id={`probe-channels-${conn.connId}`}>
+            {channelOptions.map((ch) => (
+              <option key={ch} value={ch} />
+            ))}
+          </datalist>
         </Field>
         <Field name="event">
           <FieldLabel>Event name</FieldLabel>
@@ -158,6 +154,29 @@ function ConnectionDetail({ conn, missing, onError }: {
   missing: boolean;
   onError: (message: string) => void;
 }) {
+  const [appChannels, setAppChannels] = useState<Array<AppChannel>>([]);
+  const appId = conn?.appId;
+
+  const loadChannels = useCallback(async () => {
+    if (!appId) {return;}
+    try {
+      const res = await api<AppChannelsResponse>(`/apps/${appId}/channels`);
+      setAppChannels(res.channels);
+    } catch {
+      setAppChannels([]);
+    }
+  }, [appId]);
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- resets stale channels when the selected app changes
+    setAppChannels([]);
+    void loadChannels();
+    const interval = setInterval(() => {
+      if (!document.hidden) {void loadChannels();}
+    }, POLL_MS);
+    return () => clearInterval(interval);
+  }, [loadChannels]);
+
   return (
     <Card>
       <CardHeader>
@@ -240,9 +259,22 @@ function ConnectionDetail({ conn, missing, onError }: {
               </DataListItem>
             </DataList>
             <Separator />
+            {appChannels.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <div className="font-medium text-sm">All channels on {conn.appName}</div>
+                <div className="flex flex-wrap gap-1">
+                  {appChannels.map((ch) => (
+                    <Badge key={ch.name} variant={conn.channels.includes(ch.name) ? 'accent' : 'outline'}>
+                      {ch.name}
+                      <span className="ms-1 text-muted-foreground tabular-nums">{ch.subscribers}</span>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div>
               <div className="mb-3 font-medium text-sm">Probe channel</div>
-              <ProbePanel conn={conn} key={connKey(conn)} onError={onError} />
+              <ProbePanel appChannels={appChannels} conn={conn} key={connKey(conn)} onError={onError} />
             </div>
           </>
         )}

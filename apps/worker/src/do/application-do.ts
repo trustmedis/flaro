@@ -560,6 +560,11 @@ export class ApplicationDO extends DurableObject<Env> {
     }));
   }
 
+  async channels(): Promise<Array<{ name: string; subscribers: number }>> {
+    this.ensureIndex();
+    return [...this.channelIndex].map(([name, set]) => ({ name, subscribers: set.size }));
+  }
+
   private dropConnection(state: ConnState): void {
     for (const ch of state.subs) {
       this.channelIndex.get(ch)?.delete(state.connId);

@@ -227,6 +227,19 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     return c.json({ at: new Date().toISOString(), connections });
   });
 
+  admin.get('/apps/:id/channels', async (c) => {
+    const db = drizzle(c.env.DB);
+    const id = c.req.param('id');
+    const rows = await db.select({ id: applications.id }).from(applications).where(eq(applications.id, id)).limit(1);
+    if (!rows[0]) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
+    const stub = c.env.APP_DO.get(c.env.APP_DO.idFromName(id));
+    let channels: Array<{ name: string; subscribers: number }> = [];
+    try {
+      channels = await stub.channels();
+    } catch { /* DO has no live channels or runs an older version */ }
+    return c.json({ at: new Date().toISOString(), channels });
+  });
+
   admin.post('/apps/:id/publish', async (c) => {
     const body = probePublishBody.parse(await c.req.json());
     const db = drizzle(c.env.DB);

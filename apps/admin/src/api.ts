@@ -30,6 +30,9 @@ export interface LiveConnection {
 }
 export interface ConnectionsResponse { at: string; connections: Array<LiveConnection> }
 
+export interface AppChannel { name: string; subscribers: number }
+export interface AppChannelsResponse { at: string; channels: Array<AppChannel> }
+
 export interface ProbeResult {
   delivered: number; eventId: string;
   frames: { pusher: string; rth: string };
