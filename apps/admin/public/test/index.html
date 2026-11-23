@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Realtime Hub — test</title>
+<style>
+  * { box-sizing: border-box; font-family: ui-monospace, monospace; }
+  body { max-width: 860px; margin: 24px auto; padding: 0 16px; color: #e5e5e5; background: #0a0a0a; }
+  h1 { font-size: 18px; } h2 { font-size: 14px; margin: 18px 0 8px; }
+  input, textarea, button { font: inherit; }
+  input, textarea { width: 100%; background: #171717; color: #e5e5e5; border: 1px solid #333; border-radius: 6px; padding: 7px 10px; margin: 3px 0; }
+  textarea { min-height: 60px; }
+  button { background: #e5e5e5; color: #0a0a0a; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; margin: 3px 0; }
+  button.ghost { background: transparent; color: #e5e5e5; border: 1px solid #333; }
+  button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  label { display: block; font-size: 11px; color: #999; margin-top: 6px; }
+  #log { background: #171717; border: 1px solid #333; border-radius: 6px; height: 260px; overflow-y: auto; padding: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+  .out { color: #7dd3fc; } .in { color: #86efac; } .err { color: #f87171; } .sys { color: #999; }
+  #status { font-size: 12px; color: #999; }
+</style>
+</head>
+<body>
+<h1>Realtime Hub — connection test</h1>
+<div id="status">disconnected</div>
+
+<h2>Connect</h2>
+<label>WebSocket URL (host part)</label>
+<input id="wsurl" value="" placeholder="auto" />
+<label>Subscriber token</label>
+<textarea id="token" placeholder="JWT dari subscriber token mint"></textarea>
+<div class="row">
+  <button id="btnConnect">Connect</button>
+  <button id="btnClose" class="ghost" disabled>Disconnect</button>
+</div>
+
+<h2>Subscribe</h2>
+<div class="row">
+  <input id="channel" placeholder="public:demo atau private:x" />
+  <input id="auth" placeholder="auth (opsional, pusher-style)" />
+</div>
+<div class="row">
+  <button id="btnSub" disabled>Subscribe</button>
+  <button id="btnUnsub" class="ghost" disabled>Unsubscribe</button>
+</div>
+
+<h2>Publish (HTTP)</h2>
+<div class="row"><input id="appId" placeholder="app_..." /><input id="apiKey" placeholder="rth_key_... (API key)" /></div>
+<div class="row"><input id="pubChannel" placeholder="channel" /><input id="pubEvent" placeholder="event name" value="test.ping" /></div>
+<textarea id="pubData" placeholder='{"hello":"world"}'>{"hello":"world"}</textarea>
+<button id="btnPub">Publish</button>
+
+<h2>Log</h2>
+<div id="log"></div>
+<button id="btnClear" class="ghost">Clear</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (cls, msg) => {
+  const el = document.createElement('div'); el.className = cls;
+  el.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+  $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight;
+};
+let ws = null, req = 0;
+const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+$('wsurl').value = `${proto}://${location.host}`;
+
+$('btnConnect').onclick = () => {
+  const url = `${$('wsurl').value.replace(/\/+$/,'')}/v1/connect?token=${encodeURIComponent($('token').value.trim())}`;
+  log('sys', `connecting ${$('wsurl').value}/v1/connect …`);
+  ws = new WebSocket(url);
+  ws.onopen = () => { $('status').textContent = 'connected'; ['btnSub','btnUnsub','btnClose'].forEach(b => $(b).disabled = false); $('btnConnect').disabled = true; };
+  ws.onclose = (e) => { $('status').textContent = `disconnected (${e.code})`; ['btnSub','btnUnsub','btnClose'].forEach(b => $(b).disabled = true); $('btnConnect').disabled = false; ws = null; log('err', `socket closed ${e.code}`); };
+  ws.onerror = () => log('err', 'socket error');
+  ws.onmessage = (e) => { try { log('in', JSON.stringify(JSON.parse(e.data))); } catch { log('in', e.data); } };
+};
+$('btnClose').onclick = () => ws?.close();
+const send = (o) => { log('out', JSON.stringify(o)); ws.send(JSON.stringify(o)); };
+$('btnSub').onclick = () => {
+  const m = { type: 'subscribe', requestId: `t_${++req}`, channel: $('channel').value.trim() };
+  if ($('auth').value.trim()) m.auth = $('auth').value.trim();
+  send(m);
+};
+$('btnUnsub').onclick = () => send({ type: 'unsubscribe', requestId: `t_${++req}`, channel: $('channel').value.trim() });
+$('btnPub').onclick = async () => {
+  let data = {}; try { data = JSON.parse($('pubData').value || '{}'); } catch { return log('err', 'data bukan JSON valid'); }
+  try {
+    const res = await fetch(`${$('wsurl').value.replace(/\/+$/,'').replace(/^wss?/, 'https')}/v1/apps/${$('appId').value.trim()}/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${$('apiKey').value.trim()}` },
+      body: JSON.stringify({ channel: $('pubChannel').value.trim(), event: $('pubEvent').value.trim(), data }),
+    });
+    log(res.ok ? 'sys' : 'err', `HTTP ${res.status} ${await res.text()}`);
+  } catch (e) { log('err', String(e)); }
+};
+$('btnClear').onclick = () => $('log').innerHTML = '';
+</script>
+</body>
+</html>

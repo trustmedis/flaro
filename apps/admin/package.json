@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node -e \"const fs=require('node:fs');fs.mkdirSync('dist/admin',{recursive:true});fs.renameSync('dist/index.html','dist/admin/index.html')\"",
     "lint": "oxlint",
     "preview": "vite preview"
   },

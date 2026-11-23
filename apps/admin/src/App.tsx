@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,6 +59,33 @@ export default function App() {
     setDetail(null);
   }
   const run = (fn: () => Promise<void>) => { fn().then(refresh).catch((e) => toast.error(String(e))); };
+
+  const [test, setTest] = useState({ token: '', channel: 'public:demo', apiKey: '', pubChannel: 'public:demo', event: 'test.ping', data: '{"hello":"world"}' });
+  const [testLog, setTestLog] = useState<string[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const tlog = (m: string) => setTestLog((l) => [...l.slice(-100), `${new Date().toLocaleTimeString()} ${m}`]);
+  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+
+  function testConnect() {
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null; tlog('disconnected'); return; }
+    const ws = new WebSocket(`${wsUrl}/v1/connect?token=${encodeURIComponent(test.token.trim())}`);
+    ws.onopen = () => tlog('connected');
+    ws.onclose = (e) => tlog(`closed ${e.code}`);
+    ws.onerror = () => tlog('socket error');
+    ws.onmessage = (e) => { try { tlog(`<< ${JSON.stringify(JSON.parse(e.data))}`); } catch { tlog(`<< ${e.data}`); } };
+    wsRef.current = ws;
+  }
+  const testSend = (o: object) => { tlog(`>> ${JSON.stringify(o)}`); wsRef.current?.send(JSON.stringify(o)); };
+  async function testPublish() {
+    try {
+      const res = await fetch(`${wsUrl.replace(/^wss?/, 'https')}/v1/apps/${mint.appId}/events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${test.apiKey}` },
+        body: JSON.stringify({ channel: test.pubChannel, event: test.event, data: JSON.parse(test.data || '{}') }),
+      });
+      tlog(`publish HTTP ${res.status} ${await res.text()}`);
+    } catch (e) { tlog(`publish error ${e}`); }
+  }
 
   if (!authed) return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40">
@@ -186,6 +213,31 @@ export default function App() {
             setMinted(t);
           })}>Mint</Button>
           {minted && <code className="col-span-2 block break-all rounded bg-muted p-3 text-xs">{minted}</code>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Connection test</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Label className="col-span-2">subscriber token<Input value={test.token} onChange={(e) => setTest({ ...test, token: e.target.value })} /></Label>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={testConnect}>{wsRef.current ? 'Disconnect' : 'Connect'}</Button>
+            <Input className="w-48" placeholder="channel" value={test.channel} onChange={(e) => setTest({ ...test, channel: e.target.value })} />
+            <Button size="sm" variant="outline" onClick={() => testSend({ type: 'subscribe', requestId: `t_${Date.now()}`, channel: test.channel })}>Subscribe</Button>
+            <Button size="sm" variant="outline" onClick={() => testSend({ type: 'unsubscribe', requestId: `t_${Date.now()}`, channel: test.channel })}>Unsub</Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 border-t pt-3">
+            <Label>apiKey (publish)<Input value={test.apiKey} onChange={(e) => setTest({ ...test, apiKey: e.target.value })} /></Label>
+            <Label>event<Input value={test.event} onChange={(e) => setTest({ ...test, event: e.target.value })} /></Label>
+            <Label>channel<Input value={test.pubChannel} onChange={(e) => setTest({ ...test, pubChannel: e.target.value })} /></Label>
+            <Label>data (JSON)<Input value={test.data} onChange={(e) => setTest({ ...test, data: e.target.value })} /></Label>
+          </div>
+          <Button size="sm" onClick={testPublish}>Publish event</Button>
+          <div className="h-40 overflow-y-auto rounded bg-muted p-2 font-mono text-xs">
+            {testLog.map((l, i) => <div key={i}>{l}</div>)}
+          </div>
         </CardContent>
       </Card>
 
