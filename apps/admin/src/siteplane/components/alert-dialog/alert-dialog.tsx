@@ -1,0 +1,253 @@
+"use client";
+
+import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
+import type React from "react";
+import { SiteplaneUIPortalScope } from "../../system/provider/siteplane-ui-provider";
+import { surfaceClassNames } from "../../system/styles/surface";
+import { cn, type WithStringClassName } from "../../system/utils/cn";
+import { slotClass } from "../../system/utils/slot-class";
+import { ScrollArea } from "../scroll-area";
+
+export const AlertDialogCreateHandle: typeof AlertDialogPrimitive.createHandle =
+  AlertDialogPrimitive.createHandle;
+export const AlertDialog: typeof AlertDialogPrimitive.Root =
+  AlertDialogPrimitive.Root;
+// Base UI's own Portal type, with className narrowed to a string.
+export const AlertDialogPortal: React.ForwardRefExoticComponent<
+  WithStringClassName<Omit<AlertDialogPrimitive.Portal.Props, "ref">> &
+    React.RefAttributes<HTMLDivElement>
+> = AlertDialogPrimitive.Portal;
+
+export function AlertDialogTrigger(
+  props: WithStringClassName<AlertDialogPrimitive.Trigger.Props>,
+): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Trigger
+      data-slot="alert-dialog-trigger"
+      {...props}
+      className={cn(slotClass("alert-dialog-trigger", props), props.className)}
+    />
+  );
+}
+export function AlertDialogBackdrop({
+  className,
+  ...props
+}: WithStringClassName<AlertDialogPrimitive.Backdrop.Props>): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Backdrop
+      className={cn(
+        slotClass("alert-dialog-backdrop", props),
+        surfaceClassNames.overlayBackdrop,
+        className,
+      )}
+      data-slot="alert-dialog-backdrop"
+      {...props}
+    />
+  );
+}
+export function AlertDialogViewport({
+  className,
+  ...props
+}: WithStringClassName<AlertDialogPrimitive.Viewport.Props>): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Viewport
+      className={cn(
+        slotClass("alert-dialog-viewport", props),
+        surfaceClassNames.dialogOverlayViewport,
+        className,
+      )}
+      data-slot="alert-dialog-viewport"
+      {...props}
+    />
+  );
+}
+/**
+ * The width of an AlertDialog popup on the modal scale, as Dialog's: `xs`
+ * 400 px, `sm` 440 px (the default), `md` 600 px and `lg` 880 px.
+ */
+export type AlertDialogSize = "xs" | "sm" | "md" | "lg";
+
+export function AlertDialogPopup({
+  className,
+  size = "sm",
+  portalProps,
+  ...props
+}: WithStringClassName<AlertDialogPrimitive.Popup.Props> & {
+  /**
+   * The popup width, as Dialog's: `xs` 400 px, `sm` 440 px (the default),
+   * `md` 600 px or `lg` 880 px, from the `sm` breakpoint up. A `max-w-*`
+   * class in `className` still wins.
+   */
+  size?: AlertDialogSize;
+  portalProps?: WithStringClassName<AlertDialogPrimitive.Portal.Props>;
+}): React.ReactElement {
+  return (
+    <AlertDialogPortal {...portalProps}>
+      <SiteplaneUIPortalScope>
+        <AlertDialogBackdrop />
+        <AlertDialogViewport>
+          {/* Small screens show the alert dialog at the bottom edge, where it
+              slides in. */}
+          <AlertDialogPrimitive.Popup
+            className={cn(
+              slotClass("alert-dialog-popup", props),
+              surfaceClassNames.dialogOverlayPopup,
+              surfaceClassNames.dialogOverlayPopupMobileStick,
+              className,
+            )}
+            data-slot="alert-dialog-popup"
+            data-width={size}
+            {...props}
+          />
+        </AlertDialogViewport>
+      </SiteplaneUIPortalScope>
+    </AlertDialogPortal>
+  );
+}
+export function AlertDialogHeader({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
+  const defaultProps = {
+    className: cn(
+      slotClass("alert-dialog-header", props, render),
+      "flex-col",
+      className,
+    ),
+    "data-slot": "alert-dialog-header",
+  };
+  return useRender({
+    defaultTagName: "div",
+    props: mergeProps<"div">(defaultProps, props),
+    render,
+  });
+}
+/**
+ * The content between the header and the actions, in a ScrollArea that
+ * scrolls it while the header and the actions stay in view, as a DialogPanel
+ * does. It runs to the popup's sides, and its content keeps 24 px from them
+ * and 16 px from the parts above and below it, so the line of a divided
+ * footer (`AlertDialogFooter divider`) lies on the edge where it is cut.
+ */
+export function AlertDialogPanel({
+  className,
+  scrollFade = true,
+  render,
+  ...props
+}: useRender.ComponentProps<"div"> & {
+  scrollFade?: boolean;
+}): React.ReactElement {
+  const defaultProps = {
+    className: cn(slotClass("alert-dialog-panel", props, render), className),
+    "data-slot": "alert-dialog-panel",
+  };
+  return (
+    <ScrollArea scrollFade={scrollFade}>
+      {useRender({
+        defaultTagName: "div",
+        props: mergeProps<"div">(defaultProps, props),
+        render,
+      })}
+    </ScrollArea>
+  );
+}
+
+export function AlertDialogFooter({
+  className,
+  actionLayout,
+  divider = false,
+  render,
+  ...props
+}: useRender.ComponentProps<"div"> & {
+  /**
+   * `fill` lets the Buttons of the footer share its row in equal widths, as
+   * the actions of a Card footer do; a link keeps its own width. No Button
+   * gets narrower than its words: they stack when they do not fit side by
+   * side, and a label wider than the row wraps. Left unset the actions end
+   * the row at their own widths.
+   */
+  actionLayout?: "fill" | undefined;
+  /**
+   * The hairline above the actions. `true` draws it, and `"scroll"` draws it
+   * while the content of the `AlertDialogPanel` before the footer lies under
+   * it, so it fades out at the end of the content. Either makes the footer a
+   * band that runs to the popup's edges, 16 px above and below its actions;
+   * in the scroll mode the panel gives up its 16 px under the content.
+   * `false`, the default, draws none.
+   */
+  divider?: boolean | "scroll" | undefined;
+}): React.ReactElement {
+  const defaultProps = {
+    className: cn(
+      // Actions that do not fit wrap onto another row with the same gap
+      // instead of overflowing a narrow popup. They sit 16 px below the text,
+      // the popup's gap (S12).
+      slotClass("alert-dialog-footer", props, render),
+      "flex flex-wrap",
+      className,
+    ),
+    "data-action-layout": actionLayout,
+    // The footer line's rules (design-rework.css, rulebook S15).
+    "data-divider": String(divider),
+    "data-slot": "alert-dialog-footer",
+  };
+  return useRender({
+    defaultTagName: "div",
+    props: mergeProps<"div">(defaultProps, props),
+    render,
+  });
+}
+export function AlertDialogTitle({
+  className,
+  ...props
+}: WithStringClassName<AlertDialogPrimitive.Title.Props>): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Title
+      className={cn(
+        slotClass("alert-dialog-title", props),
+        "font-heading wrap-anywhere",
+        className,
+      )}
+      data-slot="alert-dialog-title"
+      {...props}
+    />
+  );
+}
+export function AlertDialogDescription({
+  className,
+  ...props
+}: WithStringClassName<AlertDialogPrimitive.Description.Props>): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Description
+      className={cn(
+        slotClass("alert-dialog-description", props),
+        "wrap-anywhere",
+        className,
+      )}
+      data-slot="alert-dialog-description"
+      {...props}
+    />
+  );
+}
+export function AlertDialogClose(
+  props: WithStringClassName<AlertDialogPrimitive.Close.Props>,
+): React.ReactElement {
+  return (
+    <AlertDialogPrimitive.Close
+      data-slot="alert-dialog-close"
+      {...props}
+      className={cn(slotClass("alert-dialog-close", props), props.className)}
+    />
+  );
+}
+
+// AlertDialogOverlay and AlertDialogContent are aliases of
+// AlertDialogBackdrop and AlertDialogPopup.
+export {
+  AlertDialogPrimitive,
+  AlertDialogBackdrop as AlertDialogOverlay,
+  AlertDialogPopup as AlertDialogContent,
+};

@@ -1,0 +1,402 @@
+"use client";
+
+import { Toast } from "@base-ui/react/toast";
+import {
+  WarningCircleIcon,
+  CheckCircleIcon,
+  InfoIcon,
+  WarningIcon,
+} from "@phosphor-icons/react/dist/ssr";
+import * as React from "react";
+
+import { useSiteplaneMotionPreset } from "../../system/motion/siteplane-motion-provider";
+import { useSiteplaneMessages } from "../../system/locale/messages-context";
+import { cn, type WithStringClassName } from "../../system/utils/cn";
+import { Button, CloseButton } from "../button";
+import { Spinner } from "../spinner";
+import { type ToastOffset, toastOffsetProperties } from "./toast-offset";
+import { useToastStack } from "./toast-stack";
+import { toastDismissClassName, toastSurfaceClassName } from "./toast-surface";
+
+import "./toast.css";
+
+// A loading toast shows the kit Spinner instead of an icon of its own.
+const TOAST_ICONS = {
+  error: WarningCircleIcon,
+  info: InfoIcon,
+  success: CheckCircleIcon,
+  warning: WarningIcon,
+} as const;
+
+/**
+ * The content of every toast, the default one and the content `notify()`
+ * passes: it fades out as the toast steps behind the front one and back in
+ * when the stack expands (toast.css owns the fade), and a toast behind takes
+ * no pointer until then.
+ */
+const toastContentClassName =
+  "sp-toast-content-motion pointer-events-auto data-behind:not-data-expanded:pointer-events-none data-behind:opacity-0 data-expanded:opacity-100";
+
+type SwipeDirection = "up" | "down" | "left" | "right";
+
+export type ToastData = {
+  content?: React.ReactNode;
+  rootProps?: Omit<
+    React.ComponentProps<typeof Toast.Root>,
+    "children" | "className" | "swipeDirection" | "toast"
+  >;
+};
+
+function getSwipeDirection(position: ToastPosition): SwipeDirection[] {
+  const verticalDirection: SwipeDirection = position.startsWith("top")
+    ? "up"
+    : "down";
+
+  if (position.includes("center")) return [verticalDirection];
+  if (position.includes("left")) return ["left", verticalDirection];
+  return ["right", verticalDirection];
+}
+
+function upsertReplayClassName(toast: {
+  type?: string | undefined;
+  updateKey?: number | undefined;
+}): string | undefined {
+  const key = toast.updateKey ?? 0;
+  if (key <= 0) return undefined;
+  const parity = key % 2 === 0 ? "even" : "odd";
+  return toast.type === "error"
+    ? `animate-toast-error-${parity}`
+    : `animate-toast-success-${parity}`;
+}
+
+function Toasts({
+  clipAtBar,
+  dismissLabel,
+  manager,
+  mobileOffset,
+  offset,
+  position,
+  portalProps,
+}: {
+  clipAtBar: boolean;
+  dismissLabel: string;
+  manager: object | undefined;
+  mobileOffset: ToastOffset | undefined;
+  offset: ToastOffset | undefined;
+  position: ToastPosition;
+  portalProps?:
+    WithStringClassName<React.ComponentProps<typeof Toast.Portal>> | undefined;
+}): React.ReactElement {
+  const messages = useSiteplaneMessages("toast");
+  const { toasts } = Toast.useToastManager();
+  const swipeDirection = getSwipeDirection(position);
+  // Stacks of other providers at this position take the edge first when they
+  // received a toast later; this one stands back by their room, from its
+  // offset as from the screen edge.
+  const [viewport, setViewport] = React.useState<HTMLDivElement | null>(null);
+  const { mirrored, offset: stackOffset } = useToastStack(
+    position,
+    manager,
+    toasts,
+    viewport,
+  );
+  // The viewport portals out of a SiteplaneMotionProvider, so it carries the
+  // preset itself for the reduced-motion rules in toast.css.
+  const motionPreset = useSiteplaneMotionPreset();
+  const viewportStyle: Record<string, string> = {
+    ...toastOffsetProperties(offset, mobileOffset),
+    ...(stackOffset > 0 && { "--toast-stack-offset": `${stackOffset}px` }),
+  };
+
+  return (
+    <Toast.Portal
+      className="sp-toast-portal"
+      data-slot="toast-portal"
+      {...portalProps}
+    >
+      <Toast.Viewport
+        // Base UI names the region "Notifications" in English; the kit's
+        // message replaces it.
+        aria-label={messages.region}
+        ref={setViewport}
+        className={cn(
+          "sp-toast-viewport",
+          "fixed z-60 mx-auto flex w-[calc(100%-var(--toast-edge-left)-var(--toast-edge-right))] max-w-90 [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
+          // The distance from each screen edge: the offset that names the
+          // edge, mobileOffset below sm and offset from sm, or else the
+          // inset (toast-offset.ts). An offset replaces the inset, as
+          // Sonner's does; it does not add to it.
+          "[--toast-edge-top:var(--toast-mobile-offset-top,var(--toast-inset))] sm:[--toast-edge-top:var(--toast-offset-top,var(--toast-inset))]",
+          "[--toast-edge-right:var(--toast-mobile-offset-right,var(--toast-inset))] sm:[--toast-edge-right:var(--toast-offset-right,var(--toast-inset))]",
+          "[--toast-edge-bottom:var(--toast-mobile-offset-bottom,var(--toast-inset))] sm:[--toast-edge-bottom:var(--toast-offset-bottom,var(--toast-inset))]",
+          "[--toast-edge-left:var(--toast-mobile-offset-left,var(--toast-inset))] sm:[--toast-edge-left:var(--toast-offset-left,var(--toast-inset))]",
+          "data-[position*=top]:top-(--toast-edge-top)",
+          "data-[position*=bottom]:bottom-(--toast-edge-bottom)",
+          "data-[position*=left]:left-(--toast-edge-left)",
+          "data-[position*=right]:right-(--toast-edge-right)",
+          // A centred stack stands midway between its side edges.
+          "data-[position*=center]:left-[calc(50%+(var(--toast-edge-left)-var(--toast-edge-right))/2)] data-[position*=center]:-translate-x-1/2",
+          // How far past its edge a toast comes from and goes to: the screen
+          // edge, beyond the offset. With clipAtBar it is a line 1rem before
+          // the stack, where the stack is cut on the side of its edge and
+          // nowhere else, so a toast slides in from under a bar that ends at
+          // the line and a swiped one goes back under it. The line stays at
+          // the bar while the stack stands back for another stack, and both
+          // glide together (design-rework.css).
+          "data-[position*=top]:not-data-clip-at-bar:[--toast-travel:var(--toast-edge-top)]",
+          "data-[position*=bottom]:not-data-clip-at-bar:[--toast-travel:var(--toast-edge-bottom)]",
+          "data-clip-at-bar:[--toast-travel:--spacing(4)]",
+          "data-clip-at-bar:data-[position*=top]:[clip-path:inset(calc((var(--toast-travel)+var(--toast-stack-offset,0px))*-1)_-100vmax_-100vmax)]",
+          "data-clip-at-bar:data-[position*=bottom]:[clip-path:inset(-100vmax_-100vmax_calc((var(--toast-travel)+var(--toast-stack-offset,0px))*-1))]",
+          "data-[position*=top]:transform-[translateY(var(--toast-stack-offset,0px))]",
+          "data-[position*=bottom]:transform-[translateY(calc(var(--toast-stack-offset,0px)*-1))]",
+          "data-mirrored:invisible",
+        )}
+        data-clip-at-bar={clipAtBar ? "" : undefined}
+        data-mirrored={mirrored ? "" : undefined}
+        data-position={position}
+        data-slot="toast-viewport"
+        data-sp-motion={motionPreset}
+        data-stacked={toasts.length > 0 ? "" : undefined}
+        style={
+          Object.keys(viewportStyle).length > 0
+            ? (viewportStyle as React.CSSProperties)
+            : undefined
+        }
+      >
+        {toasts.map((toast) => {
+          const Icon =
+            toast.type && toast.type !== "loading"
+              ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS]
+              : null;
+          const toastData = toast.data as ToastData | undefined;
+          const hasIcon = Boolean(Icon) || toast.type === "loading";
+
+          return (
+            <Toast.Root
+              key={toast.id}
+              className={cn(
+                toastSurfaceClassName,
+                // The toast is the container its content row reads (below).
+                "@container/toast",
+                "absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) w-full select-none sp-toast-motion data-expanded:bg-(--sp-rw-surface-color) dark:data-expanded:bg-(--sp-rw-surface-color)",
+                "data-[position*=right]:right-0 data-[position*=right]:left-auto",
+                "data-[position*=left]:right-auto data-[position*=left]:left-0",
+                "data-[position*=center]:right-0 data-[position*=center]:left-0",
+                "data-[position*=top]:top-0 data-[position*=top]:bottom-auto data-[position*=top]:origin-[50%_calc(50%-50%*min(var(--toast-index,0),1))]",
+                "data-[position*=bottom]:top-auto data-[position*=bottom]:bottom-0 data-[position*=bottom]:origin-[50%_calc(50%+50%*min(var(--toast-index,0),1))]",
+                "after:absolute after:left-0 after:h-[calc(var(--toast-gap)+1px)] after:w-full",
+                "data-[position*=top]:after:top-full",
+                "data-[position*=bottom]:after:bottom-full",
+                "[--toast-calc-height:var(--toast-frontmost-height,var(--toast-height))] [--toast-gap:--spacing(3)] [--toast-peek:--spacing(3)] [--toast-scale:calc(max(0,1-(var(--toast-index)*.1)))] [--toast-exit-scale:clamp(0.82,calc(var(--toast-scale)-0.04),1)] [--toast-shrink:calc(1-var(--toast-scale))]",
+                "data-[position*=top]:[--toast-calc-offset-y:calc(var(--toast-offset-y)+var(--toast-index)*var(--toast-gap)+var(--toast-swipe-movement-y))]",
+                "data-[position*=bottom]:[--toast-calc-offset-y:calc(var(--toast-offset-y)*-1+var(--toast-index)*var(--toast-gap)*-1+var(--toast-swipe-movement-y))]",
+                "data-[position*=top]:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+(var(--toast-index)*var(--toast-peek))+(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-scale))]",
+                "data-[position*=bottom]:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--toast-peek))-(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-scale))]",
+                "data-limited:opacity-0",
+                "data-expanded:h-(--toast-height)",
+                "data-position:data-expanded:transform-[translateX(var(--toast-swipe-movement-x))_translateY(var(--toast-calc-offset-y))]",
+                // A toast enters from beyond the viewport's travel line and
+                // leaves past it when swiped up or down; a toast swiped to a
+                // side leaves past that screen edge.
+                "data-[position*=top]:data-starting-style:transform-[translateY(calc(-100%-var(--toast-travel)))]",
+                "data-[position*=bottom]:data-starting-style:transform-[translateY(calc(100%+var(--toast-travel)))]",
+                "data-ending-style:opacity-0",
+                "data-[position*=top]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+(var(--toast-index)*var(--toast-peek))+(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-exit-scale))]",
+                "data-[position*=bottom]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--toast-peek))-(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-exit-scale))]",
+                "data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-edge-left)))_translateY(var(--toast-calc-offset-y))]",
+                "data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-edge-right)))_translateY(var(--toast-calc-offset-y))]",
+                "data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-travel)))]",
+                "data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+100%+var(--toast-travel)))]",
+                "data-position:data-expanded:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateX(var(--toast-swipe-movement-x))_translateY(var(--toast-calc-offset-y))_scale(var(--toast-exit-scale))]",
+                "data-expanded:data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-edge-left)))_translateY(var(--toast-calc-offset-y))]",
+                "data-expanded:data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-edge-right)))_translateY(var(--toast-calc-offset-y))]",
+                "data-expanded:data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-travel)))]",
+                "data-expanded:data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+100%+var(--toast-travel)))]",
+                upsertReplayClassName(toast),
+              )}
+              {...toastData?.rootProps}
+              data-position={position}
+              swipeDirection={swipeDirection}
+              toast={toast}
+            >
+              {toastData?.content ? (
+                <Toast.Content
+                  className={cn(
+                    toastContentClassName,
+                    "overflow-hidden rounded-[inherit]",
+                  )}
+                >
+                  <Toast.Title className="sr-only" />
+                  {toastData.content}
+                </Toast.Content>
+              ) : (
+                <Toast.Content
+                  className={cn(
+                    toastContentClassName,
+                    "flex items-center justify-between gap-1.5 overflow-hidden py-3 ps-3.5 pe-10 text-sm",
+                    // Below 16rem of the toast's width the action goes under
+                    // the text, in line with it, as the Alert's goes under
+                    // its text below 32rem of its width. A toast is 18 to
+                    // 22.5rem wide at a 16 px font, so this happens only at a
+                    // larger browser font, from about 150 % on a phone
+                    // (Lukas, 10 November 2026, lab "Toast bei großer
+                    // Schrift", app finding 35: in one row the text column
+                    // shrank to a few pixels).
+                    "@max-[16rem]/toast:flex-wrap @max-[16rem]/toast:gap-y-2",
+                    // Below 12rem the icon stands above the text, in the row
+                    // of the close button, so the text below takes the whole
+                    // width: at 320 px and 200 % the text column kept about
+                    // 100 px beside the icon and the close button (Lukas,
+                    // 10 November 2026, lab "Toast schmal ohne Aktion", app
+                    // finding 36).
+                    "@max-[12rem]/toast:pe-3.5",
+                  )}
+                >
+                  {/* The text column may shrink, so a long title or
+                      description wraps instead of pushing the action out
+                      (rulebook K5). */}
+                  <div className="flex min-w-0 gap-2 @max-[16rem]/toast:basis-full @max-[12rem]/toast:flex-col @max-[12rem]/toast:gap-1">
+                    {hasIcon && (
+                      <div
+                        className="sp-toast-icon [&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+                        data-slot="toast-icon"
+                      >
+                        {Icon ? (
+                          // The icon takes the tone of its status dot, as
+                          // every status glyph and the Alert's (rulebook C4);
+                          // the title keeps the text colour.
+                          <Icon
+                            aria-hidden="true"
+                            className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning"
+                          />
+                        ) : (
+                          <Spinner aria-hidden="true" className="opacity-80" />
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <Toast.Title
+                        className="sp-toast-title font-(--sp-rw-font-weight-label) wrap-anywhere"
+                        data-slot="toast-title"
+                      />
+                      <Toast.Description
+                        className="sp-toast-description text-muted-foreground wrap-anywhere"
+                        data-slot="toast-description"
+                      />
+                    </div>
+                  </div>
+                  {toast.actionProps && (
+                    <Toast.Action
+                      className={cn(
+                        "sp-toast-action",
+                        // Under the text it starts where the text does,
+                        // after the 16 px icon and its 8 px gap, and at the
+                        // start once the icon stands above the text.
+                        hasIcon &&
+                          "@max-[16rem]/toast:ms-6 @max-[12rem]/toast:ms-0",
+                      )}
+                      data-slot="toast-action"
+                      render={<Button size="xs" />}
+                    >
+                      {toast.actionProps.children}
+                    </Toast.Action>
+                  )}
+                </Toast.Content>
+              )}
+              <ToastCloseButton label={dismissLabel} />
+            </Toast.Root>
+          );
+        })}
+      </Toast.Viewport>
+    </Toast.Portal>
+  );
+}
+
+function ToastCloseButton({ label }: { label: string }): React.ReactElement {
+  return (
+    <Toast.Close
+      aria-label={label}
+      className={cn("sp-toast-close", toastDismissClassName)}
+      data-slot="toast-close"
+      render={<CloseButton size="2xs" />}
+    />
+  );
+}
+
+export const toastManager: ReturnType<typeof Toast.createToastManager> =
+  Toast.createToastManager();
+
+export type ToastPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+export type { ToastOffset };
+
+export interface ToastProviderProps extends Toast.Provider.Props {
+  /**
+   * The accessible name of each toast's dismiss button: the `toast.dismiss`
+   * message by default, "Dismiss toast" in English.
+   */
+  dismissLabel?: string;
+  /**
+   * The distance between the toasts and the screen edges from `sm` (640 px)
+   * up: a number of pixels, a CSS length, or one per edge
+   * (`{ top, right, bottom, left }`). It replaces the kit's 32 px on the edges
+   * it names, as Sonner's `offset` does, and does not add to it: to keep the
+   * toasts under a top bar, give the bar's height plus the gap, such as
+   * `{ top: "calc(3.5rem + 1rem)" }`. Below `sm`, `mobileOffset` applies.
+   */
+  offset?: ToastOffset | undefined;
+  /**
+   * The distance between the toasts and the screen edges below `sm`, in the
+   * forms of `offset`. It replaces the kit's 16 px on the edges it names.
+   */
+  mobileOffset?: ToastOffset | undefined;
+  /**
+   * Clips the stack at a line 1rem before it, on the side of its screen edge,
+   * and nowhere else: a toast slides in from under the line, and a toast
+   * swiped away goes back under it. With an offset of a bar's height plus
+   * 1rem, the line is the bar's edge, so the toasts come out from under the
+   * bar.
+   */
+  clipAtBar?: boolean | undefined;
+  position?: ToastPosition;
+  portalProps?: WithStringClassName<React.ComponentProps<typeof Toast.Portal>>;
+}
+
+export function ToastProvider({
+  children,
+  clipAtBar = false,
+  dismissLabel: dismissLabelProp,
+  mobileOffset,
+  offset,
+  position = "bottom-right",
+  portalProps,
+  ...props
+}: ToastProviderProps): React.ReactElement {
+  const messages = useSiteplaneMessages("toast");
+  const dismissLabel = dismissLabelProp ?? messages.dismiss;
+  const manager = "toastManager" in props ? props.toastManager : toastManager;
+  return (
+    <Toast.Provider toastManager={toastManager} {...props}>
+      {children}
+      <Toasts
+        clipAtBar={clipAtBar}
+        dismissLabel={dismissLabel}
+        manager={manager}
+        mobileOffset={mobileOffset}
+        offset={offset}
+        portalProps={portalProps}
+        position={position}
+      />
+    </Toast.Provider>
+  );
+}
+
+export { Toast as ToastPrimitive };

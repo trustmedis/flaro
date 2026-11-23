@@ -33,10 +33,10 @@ export type AppEnv = { Bindings: Env; Variables: AppVariables };
 
 async function requireAdmin(c: { req: { header: (k: string) => string | undefined }; env: Env }): Promise<string> {
   const auth = c.req.header('authorization');
-  if (!auth?.startsWith('Bearer ')) throw new AuthError('forbidden', 'missing credentials', 403);
+  if (!auth?.startsWith('Bearer ')) {throw new AuthError('forbidden', 'missing credentials', 403);}
   const token = auth.slice(7).trim();
   const secret = c.env.ADMIN_SECRET;
-  if (secret && token === secret) return `secret:${c.req.header('x-admin-actor') ?? 'admin'}`;
+  if (secret && token === secret) {return `secret:${c.req.header('x-admin-actor') ?? 'admin'}`;}
   if (token.split('.').length === 3) {
     const payload = await verifyClerkAdminToken(c.env, token);
     return `clerk:${payload.sub ?? 'unknown'}`;
@@ -51,16 +51,16 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     try {
       c.set('actor', await requireAdmin(c));
       await next();
-    } catch (e) {
-      if (e instanceof AuthError) return c.json({ error: { code: e.code, message: e.message } }, e.status as 401);
-      throw e;
+    } catch (error) {
+      if (error instanceof AuthError) {return c.json({ error: { code: error.code, message: error.message } }, error.status);}
+      throw error;
     }
   });
 
   admin.post('/apps', async (c) => {
     const body = createAppBody.parse(await c.req.json());
     const db = drizzle(c.env.DB);
-    const id = `app_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const id = `app_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
     const tokenSecret = randomToken(32);
     const now = new Date();
     await db.insert(applications).values({
@@ -87,20 +87,20 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
       status: applications.status, createdAt: applications.createdAt, updatedAt: applications.updatedAt,
     }).from(applications).where(eq(applications.id, c.req.param('id'))).limit(1);
     const appRow = rows[0];
-    if (!appRow) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (!appRow) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
     const creds = await db.select({
       id: credentials.id, keyId: credentials.keyId, scopes: credentials.scopes,
       status: credentials.status, createdAt: credentials.createdAt,
       expiresAt: credentials.expiresAt, revokedAt: credentials.revokedAt,
     }).from(credentials).where(eq(credentials.applicationId, appRow.id));
-    return c.json({ app: appRow, credentials: creds.map((r) => ({ ...r, scopes: JSON.parse(r.scopes) })) });
+    return c.json({ app: appRow, credentials: creds.map((r) => ({ ...r, scopes: z.array(z.string()).parse(JSON.parse(r.scopes)) })) });
   });
 
   admin.post('/apps/:id/disable', async (c) => {
     const db = drizzle(c.env.DB);
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
-    if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
+    if (!rows[0]) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
     await db.update(applications).set({ status: 'disabled', updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'app.disable', id);
     const stub = c.env.APP_DO.get(c.env.APP_DO.idFromName(id));
@@ -113,10 +113,10 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const db = drizzle(c.env.DB);
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
-    if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
-    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
+    if (!rows[0]) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
+    if (rows[0].status !== 'active') {return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);}
     const { keyId, secret, apiKey } = mintApiKey();
-    const credId = `cred_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const credId = `cred_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
     const now = new Date();
     const expiresAt = body.expiresInSeconds ? new Date(now.getTime() + body.expiresInSeconds * 1000) : null;
     await db.insert(credentials).values({
@@ -135,8 +135,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const keyId = c.req.param('keyId');
     const rows = await db.select().from(credentials).where(eq(credentials.keyId, keyId)).limit(1);
     const cred = rows[0];
-    if (!cred || cred.applicationId !== id) return c.json({ error: { code: 'not_found', message: 'credential not found' } }, 404);
-    if (cred.status !== 'active') return c.json({ error: { code: 'already_revoked', message: 'credential already revoked' } }, 409);
+    if (!cred || cred.applicationId !== id) {return c.json({ error: { code: 'not_found', message: 'credential not found' } }, 404);}
+    if (cred.status !== 'active') {return c.json({ error: { code: 'already_revoked', message: 'credential already revoked' } }, 409);}
     await db.update(credentials).set({ status: 'revoked', revokedAt: new Date() }).where(eq(credentials.keyId, keyId));
     await audit(db, c.get('actor'), 'credential.revoke', id, { keyId });
     return c.json({ keyId, status: 'revoked' });
@@ -146,12 +146,43 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const db = drizzle(c.env.DB);
     const id = c.req.param('id');
     const rows = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
-    if (!rows[0]) return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);
-    if (rows[0].status !== 'active') return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);
+    if (!rows[0]) {return c.json({ error: { code: 'not_found', message: 'application not found' } }, 404);}
+    if (rows[0].status !== 'active') {return c.json({ error: { code: 'app_disabled', message: 'application is disabled' } }, 409);}
     const tokenSecret = randomToken(32);
     await db.update(applications).set({ tokenSecret, updatedAt: new Date() }).where(eq(applications.id, id));
     await audit(db, c.get('actor'), 'token_secret.rotate', id);
     return c.json({ id, tokenSecret });
+  });
+
+  admin.get('/stats', async (c) => {
+    const db = drizzle(c.env.DB);
+    const rows = await db.select({
+      id: applications.id, name: applications.name, environment: applications.environment,
+      status: applications.status,
+    }).from(applications);
+    const apps = await Promise.all(rows.map(async (appRow) => {
+      let live: {
+        channels: number; connections: number; connectionsTimeline: Array<number>;
+        eventsPerMinute: number; eventsTimeline: Array<number>;
+        presenceMembers: number; subscribers: number;
+      } | null;
+      try {
+        live = await c.env.APP_DO.get(c.env.APP_DO.idFromName(appRow.id)).stats();
+      } catch { live = null; }
+      return { ...appRow, live };
+    }));
+    const totals = apps.reduce((acc, appRow) => ({
+      channels: acc.channels + (appRow.live?.channels ?? 0),
+      connections: acc.connections + (appRow.live?.connections ?? 0),
+      connectionsTimeline: acc.connectionsTimeline.map((v, i) => v + (appRow.live?.connectionsTimeline[i] ?? 0)),
+      eventsPerMinute: acc.eventsPerMinute + (appRow.live?.eventsPerMinute ?? 0),
+      eventsTimeline: acc.eventsTimeline.map((v, i) => v + (appRow.live?.eventsTimeline[i] ?? 0)),
+      subscribers: acc.subscribers + (appRow.live?.subscribers ?? 0),
+    }), {
+      channels: 0, connections: 0, connectionsTimeline: new Array<number>(60).fill(0),
+      eventsPerMinute: 0, eventsTimeline: new Array<number>(60).fill(0), subscribers: 0,
+    });
+    return c.json({ apps, at: new Date().toISOString(), totals });
   });
 
   admin.get('/audit', async (c) => {

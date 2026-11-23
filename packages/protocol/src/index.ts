@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export type JsonValue = string | number | boolean | null | Array<JsonValue> | { [k: string]: JsonValue };
+export const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValue), z.record(z.string(), jsonValue)]),
+);
+
 export const PROTOCOL_VERSION = 1;
 export const MAX_CHANNEL_NAME_LENGTH = 128;
 export const MAX_SUBSCRIPTIONS_PER_CONNECTION = 100;
@@ -132,9 +137,22 @@ export const pusherChannelData = z.object({
 });
 export type PusherChannelData = z.infer<typeof pusherChannelData>;
 
+// Pusher client → server frame; `data` may arrive as a JSON-encoded string.
+export const pusherClientFrame = z.object({
+  event: z.unknown(),
+  channel: z.unknown(),
+  data: z.unknown(),
+});
+export type PusherClientFrame = z.infer<typeof pusherClientFrame>;
+
+export const pusherUnsubscribeData = z.object({
+  channel: z.string().min(1),
+});
+export type PusherUnsubscribeData = z.infer<typeof pusherUnsubscribeData>;
+
 // Pusher frames carry `data` as a JSON-encoded *string*.
 export function pusherFrame(event: string, channel: string | undefined, data: unknown): string {
-  return JSON.stringify({ event, ...(channel !== undefined ? { channel } : {}), data: JSON.stringify(data ?? {}) });
+  return JSON.stringify({ event, channel, data: JSON.stringify(data ?? {}) });
 }
 export function isPusherPrivateChannel(channel: string): boolean {
   return channel.startsWith('private-') || channel.startsWith('presence-');

@@ -1,15 +1,37 @@
+import { z } from 'zod';
+
 export interface AdminApp {
   id: string; name: string; environment: string; status: string;
   createdAt: string; updatedAt?: string;
 }
 export interface Credential {
-  keyId: string; scopes: string[]; status: string;
+  keyId: string; scopes: Array<string>; status: string;
   createdAt: string; expiresAt: string | null; revokedAt: string | null;
 }
 export interface AuditEntry {
   id: number; actor: string; action: string; applicationId: string;
   metadata: string; timestamp: string;
 }
+export interface AppLiveStats {
+  channels: number; connections: number; connectionsTimeline: Array<number>;
+  eventsPerMinute: number; eventsTimeline: Array<number>;
+  presenceMembers: number; subscribers: number;
+}
+export interface LiveApp {
+  id: string; name: string; environment: string; status: string;
+  live: AppLiveStats | null;
+}
+export interface LiveStatsResponse {
+  apps: Array<LiveApp>; at: string;
+  totals: {
+    channels: number; connections: number; connectionsTimeline: Array<number>;
+    eventsPerMinute: number; eventsTimeline: Array<number>; subscribers: number;
+  };
+}
+
+const apiErrorBody = z.object({
+  error: z.object({ code: z.string(), message: z.string() }).partial(),
+}).partial();
 
 type TokenGetter = () => Promise<string | null>;
 let tokenGetter: TokenGetter | null = null;
@@ -17,22 +39,27 @@ export const setTokenGetter = (g: TokenGetter | null) => { tokenGetter = g; };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = tokenGetter ? await tokenGetter() : null;
-  const res = await fetch(`/admin${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.code ? `${data.error.code}: ${data.error.message}` : `HTTP ${res.status}`);
+  const headers = new Headers({ authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json' });
+  new Headers(init?.headers).forEach((v, k) => { headers.set(k, v); });
+  const res = await fetch(`/admin${path}`, { ...init, headers });
+  const data: unknown = res.ok ? await res.json() : await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const parsed = apiErrorBody.safeParse(data);
+    const err = parsed.success ? parsed.data.error : undefined;
+    throw new Error(err?.code ? `${err.code}: ${err.message}` : `HTTP ${res.status}`);
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- api<T> trusts the response shape; callers declare T
   return data as T;
 }
 
 // HMAC-SHA256 subscriber token minting (client-side, WebCrypto)
+const b64 = (b: ArrayBuffer | string) =>
+  btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b)))
+    .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+
 export async function mintSubscriberToken(secret: string, claims: {
-  appId: string; sub: string; channels: string[]; iss: string; aud: string; ttl: number;
+  appId: string; sub: string; channels: Array<string>; iss: string; aud: string; ttl: number;
 }): Promise<string> {
-  const b64 = (b: ArrayBuffer | string) =>
-    btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b)))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const now = Math.floor(Date.now() / 1000);
   const header = b64(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = b64(JSON.stringify({

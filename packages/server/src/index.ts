@@ -1,4 +1,10 @@
-import { publishRequest, publishResponse, type PublishRequest } from '@internal/realtime-protocol';
+import { z } from 'zod';
+import { publishRequest, publishResponse } from '@internal/realtime-protocol';
+import type { PublishRequest } from '@internal/realtime-protocol';
+
+const publishErrorBody = z.object({
+  error: z.object({ code: z.string(), message: z.string() }).partial(),
+}).partial();
 
 export class RealtimeError extends Error {
   code: string;
@@ -51,11 +57,11 @@ export class RealtimeServer {
       attempt++;
       try {
         return await this.attemptPublish(body);
-      } catch (e) {
-        lastError = e instanceof RealtimeError ? e : new RealtimeError('network_error', String(e));
+      } catch (error) {
+        lastError = error instanceof RealtimeError ? error : new RealtimeError('network_error', String(error));
         const retryable = lastError.code === 'network_error' || (lastError.status ?? 0) >= 500;
-        if (!retryable || attempt > this.maxRetries) throw lastError;
-        await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** (attempt - 1), 8000)));
+        if (!retryable || attempt > this.maxRetries) {throw lastError;}
+        await new Promise((r) => { setTimeout(r, Math.min(1000 * 2 ** (attempt - 1), 8000)); });
       }
     }
     throw lastError ?? new RealtimeError('unknown', 'publish failed');
@@ -75,26 +81,25 @@ export class RealtimeServer {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-    } catch (e) {
-      throw new RealtimeError('network_error', e instanceof Error ? e.message : 'network error');
+    } catch (error) {
+      throw new RealtimeError('network_error', error instanceof Error ? error.message : 'network error');
     } finally {
       clearTimeout(timer);
     }
 
-    const text = await res.text();
-    let json: unknown = null;
-    try { json = JSON.parse(text); } catch { /* non-JSON */ }
+    const json = z.unknown().parse(await res.json().catch(() => null));
 
     if (!res.ok) {
-      const errBody = json as { error?: { code?: string; message?: string } } | null;
+      const errBody = publishErrorBody.safeParse(json);
+      const err = errBody.success ? errBody.data.error : undefined;
       throw new RealtimeError(
-        errBody?.error?.code ?? `http_${res.status}`,
-        errBody?.error?.message ?? `publish failed with status ${res.status}`,
+        err?.code ?? `http_${res.status}`,
+        err?.message ?? `publish failed with status ${res.status}`,
         res.status,
       );
     }
     const parsed = publishResponse.safeParse(json);
-    if (!parsed.success) throw new RealtimeError('bad_response', 'publish response failed validation', res.status);
+    if (!parsed.success) {throw new RealtimeError('bad_response', 'publish response failed validation', res.status);}
     return { eventId: parsed.data.eventId };
   }
 }
