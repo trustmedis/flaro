@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+routes = [
+  { pattern = "flaro.trustmedis.net", custom_domain = true }
+]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "realtime-hub"
@@ -16,10 +20,6 @@ class_name = "ApplicationDO"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ApplicationDO"]
-
-routes = [
-  { pattern = "flaro.trustmedis.net", custom_domain = true }
-]
 
 [assets]
 directory = "../admin/dist"

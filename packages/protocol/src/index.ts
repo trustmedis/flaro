@@ -117,3 +117,19 @@ export function channelPrefix(channel: string): string {
   const idx = channel.indexOf(':');
   return idx === -1 ? '' : channel.slice(0, idx + 1);
 }
+
+// --- Pusher-compatible protocol ---
+export const pusherSubscribeData = z.object({
+  channel: z.string().min(1).max(128),
+  auth: z.string().max(512).optional(),
+  channel_data: z.string().max(1024).optional(),
+});
+export type PusherSubscribeData = z.infer<typeof pusherSubscribeData>;
+
+// Pusher frames carry `data` as a JSON-encoded *string*.
+export function pusherFrame(event: string, channel: string | undefined, data: unknown): string {
+  return JSON.stringify({ event, ...(channel !== undefined ? { channel } : {}), data: JSON.stringify(data ?? {}) });
+}
+export function isPusherPrivateChannel(channel: string): boolean {
+  return channel.startsWith('private-') || channel.startsWith('presence-');
+}
