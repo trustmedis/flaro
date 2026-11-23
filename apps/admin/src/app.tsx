@@ -102,7 +102,16 @@ export default function App() {
 
   useEffect(() => {
     if (!isSignedIn) { setTokenGetter(null); return; }
-    setTokenGetter(getToken);
+    setTokenGetter(async () => {
+      // Session token is minted asynchronously right after sign-in; wait
+      // briefly so the first requests don't race ahead with an empty bearer.
+      for (let i = 0; i < 10; i++) {
+        const token = await getToken();
+        if (token) {return token;}
+        await new Promise((resolve) => { setTimeout(resolve, 200); });
+      }
+      return null;
+    });
   }, [isSignedIn, getToken]);
 
   const [view, setView] = useState<View>('dashboard');
