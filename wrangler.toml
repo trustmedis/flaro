@@ -1,7 +1,7 @@
 # Deploy-time config for Cloudflare Workers Builds, which runs
 # `npx wrangler preview` at the repo root. Mirrors apps/worker/wrangler.toml
 # with root-relative paths — keep the two in sync.
-name = "realtime-hub"
+name = "flaro"
 main = "apps/worker/src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
