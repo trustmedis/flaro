@@ -4,3 +4,4 @@ dist/
 .dev.vars
 .verify-evidence/
 *.tsbuildinfo
+apps/worker/test/.test-app.json

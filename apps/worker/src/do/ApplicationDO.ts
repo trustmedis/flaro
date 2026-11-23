@@ -4,6 +4,7 @@ import {
   isPusherPrivateChannel,
   MAX_SUBSCRIPTIONS_PER_CONNECTION,
   PROTOCOL_VERSION,
+  pusherChannelData,
   pusherFrame,
   pusherSubscribeData,
   type SubscriberTokenClaims,
@@ -19,6 +20,7 @@ interface Attachment {
   allowed: string[];
   sub: string;
   mode?: 'pusher';
+  members?: Record<string, { id: string; info: unknown }>;
 }
 
 interface ConnState {
@@ -27,6 +29,12 @@ interface ConnState {
   subs: Set<string>;
   mode: 'rth' | 'pusher';
   lastOp: Map<string, 'sub' | 'unsub'>;
+  members?: Map<string, { id: string; info: unknown }>;
+}
+
+interface PresenceMember {
+  info: unknown;
+  conns: Set<string>;
 }
 
 const PUBLISH_LIMIT_PER_MINUTE = 600;
@@ -36,6 +44,7 @@ export class ApplicationDO extends DurableObject<Env> {
   private indexBuilt = false;
   private conns = new Map<string, ConnState>();
   private channelIndex = new Map<string, Set<string>>();
+  private presenceIndex = new Map<string, Map<string, PresenceMember>>();
   private publishWindow: number[] = [];
 
   private connIdFor(ws: WebSocket): string {
@@ -48,16 +57,27 @@ export class ApplicationDO extends DurableObject<Env> {
     this.indexBuilt = true;
     this.conns.clear();
     this.channelIndex.clear();
+    this.presenceIndex.clear();
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att || att.v !== 1) continue;
       if (!this.appId && att.appId) this.appId = att.appId;
       const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth', lastOp: new Map() };
+      if (att.members) state.members = new Map(Object.entries(att.members));
       this.conns.set(att.connId, state);
       for (const ch of att.subs) {
         let set = this.channelIndex.get(ch);
         if (!set) this.channelIndex.set(ch, (set = new Set()));
         set.add(att.connId);
+      }
+      if (state.members) {
+        for (const [ch, member] of state.members) {
+          let chan = this.presenceIndex.get(ch);
+          if (!chan) this.presenceIndex.set(ch, (chan = new Map()));
+          let entry = chan.get(member.id);
+          if (!entry) chan.set(member.id, (entry = { info: member.info, conns: new Set() }));
+          entry.conns.add(att.connId);
+        }
       }
     }
   }
@@ -74,7 +94,11 @@ export class ApplicationDO extends DurableObject<Env> {
   }
 
   private persistAttachment(state: ConnState, allowed: string[], sub: string, appId?: string): void {
-    const att: Attachment = { v: 1, connId: state.connId, appId: appId ?? this.appId ?? '', subs: [...state.subs], allowed, sub, ...(state.mode === 'pusher' ? { mode: 'pusher' as const } : {}) };
+    const att: Attachment = {
+      v: 1, connId: state.connId, appId: appId ?? this.appId ?? '', subs: [...state.subs], allowed, sub,
+      ...(state.mode === 'pusher' ? { mode: 'pusher' as const } : {}),
+      ...(state.members?.size ? { members: Object.fromEntries(state.members) } : {}),
+    };
     const size = new TextEncoder().encode(JSON.stringify(att)).length;
     if (size > MAX_ATTACHMENT_BYTES) {
       state.ws.close(4009, 'attachment limit');
@@ -93,7 +117,13 @@ export class ApplicationDO extends DurableObject<Env> {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
       this.ctx.acceptWebSocket(server);
-      const connId = `conn_${crypto.randomUUID()}`;
+      // Pusher socket ids look like "1234.5678"; pusher server-side libraries
+      // validate the format before signing channel auth.
+      let connId: string;
+      do {
+        const r = crypto.getRandomValues(new Uint32Array(2));
+        connId = `${r[0]}.${r[1]}`;
+      } while (this.conns.has(connId));
       const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'pusher', lastOp: new Map() };
       this.conns.set(connId, state);
       this.indexBuilt = true;
@@ -158,13 +188,24 @@ export class ApplicationDO extends DurableObject<Env> {
     state.ws.send(JSON.stringify({ event: 'pusher:error', data: JSON.stringify({ code: null, message }) }));
   }
 
-  private async verifyChannelAuth(auth: string, channel: string, connId: string): Promise<boolean> {
+  private pusherSubscriptionError(state: ConnState, channel: string, message: string, status = 403): void {
+    state.ws.send(JSON.stringify({
+      event: 'pusher:subscription_error',
+      channel,
+      data: JSON.stringify({ type: 'AuthError', error: message, status }),
+    }));
+  }
+
+  private async verifyChannelAuth(auth: string, channel: string, connId: string, channelData?: string): Promise<boolean> {
     const secret = await this.appSecretKey();
     if (!secret) return false;
     const idx = auth.indexOf(':');
+    const key = idx === -1 ? '' : auth.slice(0, idx);
     const sig = idx === -1 ? '' : auth.slice(idx + 1);
+    if (key !== this.appId) return false;
+    const base = channelData !== undefined ? `${connId}:${channel}:${channelData}` : `${connId}:${channel}`;
     const { hmacSha256 } = await import('../auth');
-    const expected = await hmacSha256(secret, `${connId}:${channel}`);
+    const expected = await hmacSha256(secret, base);
     return sig.length > 0 && sig.toLowerCase() === expected;
   }
 
@@ -181,11 +222,14 @@ export class ApplicationDO extends DurableObject<Env> {
     if (event === 'pusher:unsubscribe') {
       const d = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data as { channel?: string };
       const channel = d?.channel;
-      if (channel) state.lastOp.set(channel, 'unsub');
-      if (channel && state.subs.delete(channel)) {
-        this.channelIndex.get(channel)?.delete(state.connId);
-        const att = state.ws.deserializeAttachment() as Attachment | null;
-        this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
+      if (channel) {
+        state.lastOp.set(channel, 'unsub');
+        if (state.subs.delete(channel)) {
+          this.channelIndex.get(channel)?.delete(state.connId);
+          this.removePresenceMember(state, channel);
+          const att = state.ws.deserializeAttachment() as Attachment | null;
+          this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
+        }
       }
       return;
     }
@@ -193,14 +237,29 @@ export class ApplicationDO extends DurableObject<Env> {
       const d = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
       const data = pusherSubscribeData.safeParse(d);
       if (!data.success) return this.pusherError(state, 'invalid subscribe data');
-      const { channel, auth } = data.data;
-      if (channel.startsWith('presence-')) return this.pusherError(state, 'presence channels are not supported');
+      const { channel, auth, channel_data } = data.data;
       state.lastOp.set(channel, 'sub');
+
+      if (state.subs.has(channel)) {
+        return state.ws.send(this.subscriptionSucceededFrame(state, channel));
+      }
+      const isPresence = channel.startsWith('presence-');
       if (isPusherPrivateChannel(channel)) {
-        if (!auth || !(await this.verifyChannelAuth(auth, channel, state.connId))) {
-          return this.pusherError(state, `Could not find app for key ${channel.split('-')[0]}.`);
+        if (!auth || !(await this.verifyChannelAuth(auth, channel, state.connId, channel_data))) {
+          return this.pusherSubscriptionError(state, channel, 'Auth for subscription failed');
         }
         if (this.conns.get(state.connId) !== state || state.lastOp.get(channel) !== 'sub') return;
+      }
+      let member: { id: string; info: unknown } | undefined;
+      if (isPresence) {
+        if (!channel_data) return this.pusherSubscriptionError(state, channel, 'channel_data is required for presence channels', 400);
+        try {
+          const parsed = pusherChannelData.safeParse(JSON.parse(channel_data));
+          if (!parsed.success) return this.pusherSubscriptionError(state, channel, 'invalid channel_data', 400);
+          member = { id: parsed.data.user_id, info: parsed.data.user_info };
+        } catch {
+          return this.pusherSubscriptionError(state, channel, 'invalid channel_data', 400);
+        }
       }
       if (state.subs.size >= MAX_SUBSCRIPTIONS_PER_CONNECTION && !state.subs.has(channel)) {
         return this.pusherError(state, 'too many subscriptions');
@@ -209,15 +268,19 @@ export class ApplicationDO extends DurableObject<Env> {
       let set = this.channelIndex.get(channel);
       if (!set) this.channelIndex.set(channel, (set = new Set()));
       set.add(state.connId);
+      if (member) this.addPresenceMember(state, channel, member);
       const att = state.ws.deserializeAttachment() as Attachment | null;
       this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
-      state.ws.send(pusherFrame('pusher_internal:subscription_succeeded', channel, {}));
+      state.ws.send(this.subscriptionSucceededFrame(state, channel));
       return;
     }
     if (event.startsWith('client-')) {
       const channel = raw.channel;
       if (channel && isPusherPrivateChannel(channel) && state.subs.has(channel)) {
-        const frame = pusherFrame(event, channel, raw.data);
+        const member = state.members?.get(channel);
+        const frame = member
+          ? JSON.stringify({ event, channel, user_id: member.id, data: JSON.stringify(raw.data ?? {}) })
+          : pusherFrame(event, channel, raw.data);
         const targets = this.channelIndex.get(channel);
         if (targets) {
           for (const id of [...targets]) {
@@ -229,6 +292,57 @@ export class ApplicationDO extends DurableObject<Env> {
         }
       }
       return;
+    }
+  }
+
+  private subscriptionSucceededFrame(state: ConnState, channel: string): string {
+    const member = state.members?.get(channel);
+    if (!member) return pusherFrame('pusher_internal:subscription_succeeded', channel, {});
+    const chan = this.presenceIndex.get(channel);
+    const ids = [...(chan?.keys() ?? [])];
+    const hash: Record<string, unknown> = {};
+    for (const [uid, m] of chan ?? []) hash[uid] = m.info;
+    return pusherFrame('pusher_internal:subscription_succeeded', channel, {
+      presence: { ids, hash, count: ids.length },
+    });
+  }
+
+  private addPresenceMember(state: ConnState, channel: string, member: { id: string; info: unknown }): void {
+    state.members ??= new Map();
+    state.members.set(channel, member);
+    let chan = this.presenceIndex.get(channel);
+    if (!chan) this.presenceIndex.set(channel, (chan = new Map()));
+    const existing = chan.get(member.id);
+    if (existing) {
+      existing.conns.add(state.connId);
+      return;
+    }
+    chan.set(member.id, { info: member.info, conns: new Set([state.connId]) });
+    const frame = pusherFrame('pusher_internal:member_added', channel, { user_id: member.id, user_info: member.info });
+    for (const id of [...(this.channelIndex.get(channel) ?? [])]) {
+      if (id === state.connId) continue;
+      const t = this.conns.get(id);
+      if (!t) continue;
+      try { t.ws.send(frame); } catch { this.dropConnection(t); }
+    }
+  }
+
+  private removePresenceMember(state: ConnState, channel: string): void {
+    const member = state.members?.get(channel);
+    if (!member) return;
+    state.members!.delete(channel);
+    const chan = this.presenceIndex.get(channel);
+    const entry = chan?.get(member.id);
+    if (!chan || !entry) return;
+    entry.conns.delete(state.connId);
+    if (entry.conns.size > 0) return;
+    chan.delete(member.id);
+    if (chan.size === 0) this.presenceIndex.delete(channel);
+    const frame = pusherFrame('pusher_internal:member_removed', channel, { user_id: member.id });
+    for (const id of [...(this.channelIndex.get(channel) ?? [])]) {
+      const t = this.conns.get(id);
+      if (!t) continue;
+      try { t.ws.send(frame); } catch { this.dropConnection(t); }
     }
   }
 
@@ -321,7 +435,10 @@ export class ApplicationDO extends DurableObject<Env> {
   }
 
   private dropConnection(state: ConnState): void {
-    for (const ch of state.subs) this.channelIndex.get(ch)?.delete(state.connId);
+    for (const ch of state.subs) {
+      this.channelIndex.get(ch)?.delete(state.connId);
+      this.removePresenceMember(state, ch);
+    }
     state.subs.clear();
     this.conns.delete(state.connId);
     try { state.ws.close(1011, 'slow consumer'); } catch { /* already closed */ }
@@ -335,6 +452,7 @@ export class ApplicationDO extends DurableObject<Env> {
     }
     this.conns.clear();
     this.channelIndex.clear();
+    this.presenceIndex.clear();
     this.indexBuilt = false;
     return { closed };
   }
@@ -344,7 +462,10 @@ export class ApplicationDO extends DurableObject<Env> {
     const connId = this.connIdFor(ws);
     const state = this.conns.get(connId);
     if (state) {
-      for (const ch of state.subs) this.channelIndex.get(ch)?.delete(connId);
+      for (const ch of state.subs) {
+        this.channelIndex.get(ch)?.delete(connId);
+        this.removePresenceMember(state, ch);
+      }
       this.conns.delete(connId);
     }
   }

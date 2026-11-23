@@ -1,0 +1,61 @@
+# Deploy-time config for Cloudflare Workers Builds, which runs
+# `npx wrangler preview` at the repo root. Mirrors apps/worker/wrangler.toml
+# with root-relative paths — keep the two in sync.
+name = "realtime-hub"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+routes = [
+  { pattern = "flaro.trustmedis.net", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "realtime-hub"
+database_id = "a3ee7ed0-685f-4bb2-926f-a85e8d2f2a58"
+migrations_dir = "apps/worker/migrations"
+
+[[durable_objects.bindings]]
+name = "APP_DO"
+class_name = "ApplicationDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ApplicationDO"]
+
+[assets]
+directory = "apps/admin/dist"
+
+[vars]
+CLERK_ISSUER = "https://wanted-eagle-57.clerk.accounts.dev"
+
+[observability]
+enabled = true
+
+[previews.vars]
+CLERK_ISSUER = "https://wanted-eagle-57.clerk.accounts.dev"
+
+[[previews.unsafe.bindings]]
+name = "APP_DO"
+type = "durable_object_namespace"
+class_name = "ApplicationDO"
+namespace_id = "00060a24dccb448ea83d8221737ce0d7"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_id = "a3ee7ed0-685f-4bb2-926f-a85e8d2f2a58"
+
+[previews.observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[previews.observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
+
+[previews.observability.issue_detection]
+enabled = false

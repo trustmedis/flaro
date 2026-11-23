@@ -93,6 +93,19 @@ Smoke tests: `node apps/worker/pusher-smoke.mjs` (needs `APP` + `SECRET` env)
 and the `verify-realtime-hub` agent skill under `.agents/skills/` for end-to-end
 WebSocket/publish proofs.
 
+`pnpm --filter @internal/worker test` runs the Pusher-compatibility suite —
+a vitest port of pusher-js's own integration spec
+(`spec/.../pusher_spec/test_builder.js`, 31 cases: public/private/presence
+channels, client events, subscription state transitions). `global-setup`
+spins up an isolated `wrangler dev` on :8791 with a fresh local D1, creates a
+test app via the admin API, then real `pusher-js` + `pusher` (http lib) drive
+the WS and REST surfaces. Set `PUSHER_TEST_PORT`/`PUSHER_TEST_ADMIN_SECRET`
+to override.
+
+Pusher-compat scope: `private-`, `presence-`, `client-*` events, and the
+signed REST trigger/channels API are supported on `/app/:key`; the native
+`/v1/connect` protocol still reserves `presence:` (PRD-01).
+
 ## Design docs
 
 `docs/prd/` — PRD-01 realtime core, PRD-02 auth & app management, PRD-03 SDK &
