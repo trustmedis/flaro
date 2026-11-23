@@ -39,7 +39,7 @@ export class ApplicationDO extends DurableObject<Env> {
 
   private connIdFor(ws: WebSocket): string {
     const att = ws.deserializeAttachment() as Attachment | null;
-    return att?.connId ?? '';
+    return att?.v === 1 ? att.connId : '';
   }
 
   private ensureIndex(): void {
@@ -49,7 +49,7 @@ export class ApplicationDO extends DurableObject<Env> {
     this.channelIndex.clear();
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as Attachment | null;
-      if (!att) continue;
+      if (!att || att.v !== 1) continue;
       if (!this.appId && att.appId) this.appId = att.appId;
       const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth' };
       this.conns.set(att.connId, state);
