@@ -22,6 +22,7 @@ export interface RealtimeClientOptions {
 interface ChannelRecord {
   name: string;
   subscribed: boolean;
+  wanted: boolean;
 }
 
 export class Channel<TEvents extends Record<string, unknown> = Record<string, unknown>> {
@@ -112,7 +113,7 @@ export class RealtimeClient {
   channel<T extends Record<string, unknown> = Record<string, unknown>>(name: string): Channel<T> {
     let rec = this.channels.get(name) as ChannelRecord | undefined;
     if (!rec) {
-      rec = { name, subscribed: false };
+      rec = { name, subscribed: false, wanted: false };
       this.channels.set(name, rec);
     }
     const existing = (this as unknown as { _channelCache?: Map<string, Channel> })._channelCache;
@@ -229,7 +230,7 @@ export class RealtimeClient {
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.doConnect().catch(() => this.onClose());
+      this.connect().catch(() => this.onClose());
     }, jitter);
   }
 
@@ -262,6 +263,7 @@ export class RealtimeClient {
   async subscribeChannel(name: string): Promise<void> {
     const rec = this.channels.get(name);
     if (!rec) throw new Error(`unknown channel ${name}; call channel() first`);
+    rec.wanted = true;
     if (rec.subscribed) return;
     const existing = this.pendingSubscribes.get(name);
     if (existing) return existing;
@@ -276,7 +278,9 @@ export class RealtimeClient {
 
   async unsubscribeChannel(name: string): Promise<void> {
     const rec = this.channels.get(name);
-    if (!rec || !rec.subscribed) return;
+    if (!rec) return;
+    rec.wanted = false;
+    if (!rec.subscribed && !this.pendingSubscribes.has(name)) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { rec.subscribed = false; return; }
     this.send({ type: 'unsubscribe', requestId: `req_${++this.reqCounter}`, channel: name });
     rec.subscribed = false;
@@ -298,7 +302,7 @@ export class RealtimeClient {
 
   private async resubscribeAll(): Promise<void> {
     for (const [name, rec] of this.channels) {
-      if (rec.subscribed || this.pendingSubscribes.has(name)) continue;
+      if (!rec.wanted || rec.subscribed || this.pendingSubscribes.has(name)) continue;
       try {
         await this.requestAck(name, (requestId) => ({ type: 'subscribe', requestId, channel: name }));
         rec.subscribed = true;
