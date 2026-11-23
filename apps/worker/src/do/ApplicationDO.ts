@@ -36,7 +36,6 @@ export class ApplicationDO extends DurableObject<Env> {
   private conns = new Map<string, ConnState>();
   private channelIndex = new Map<string, Set<string>>();
   private publishWindow: number[] = [];
-  private appSecret: string | null = null;
 
   private connIdFor(ws: WebSocket): string {
     const att = ws.deserializeAttachment() as Attachment | null;
@@ -65,14 +64,12 @@ export class ApplicationDO extends DurableObject<Env> {
   private appId: string | null = null;
 
   private async appSecretKey(): Promise<string | null> {
-    if (this.appSecret) return this.appSecret;
     if (!this.appId) return null;
     const { drizzle } = await import('drizzle-orm/d1');
     const { applications } = await import('../db/schema');
     const { eq } = await import('drizzle-orm');
     const rows = await drizzle(this.env.DB).select({ s: applications.tokenSecret }).from(applications).where(eq(applications.id, this.appId)).limit(1);
-    this.appSecret = rows[0]?.s ?? null;
-    return this.appSecret;
+    return rows[0]?.s ?? null;
   }
 
   private persistAttachment(state: ConnState, allowed: string[], sub: string, appId?: string): void {
