@@ -6,3 +6,7 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+permissions:
+  everystate:
+    build: true
+    skills: true

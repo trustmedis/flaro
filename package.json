@@ -10,6 +10,7 @@
     "deploy:worker": "pnpm --filter @internal/worker run deploy"
   },
   "devDependencies": {
+    "everystate": "0.4.1",
     "typescript": "5.9.3"
   }
 }

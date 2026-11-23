@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      everystate:
+        specifier: 0.4.1
+        version: 0.4.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -1618,6 +1621,11 @@ packages:
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
+
+  everystate@0.4.1:
+    resolution: {integrity: sha512-edqnujHaz9iTzuFskCa3IiU2evgh/dMnwkQofnW9rZ3tr7VYN7LGzHOxszPKD0MSr+VK1ssKDe4csHRNy8q64w==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   execa@5.1.1:
     resolution: {integrity: sha512-8uSpZZocAZRBAPIEINJj3Lo9HyGitllczc27Eh5YYojjMFMn8yHMDMaUHE2Jqfq05D/wucwI4JGURyXt1vchyg==}
@@ -3669,6 +3677,8 @@ snapshots:
   esprima@4.0.1: {}
 
   event-target-shim@5.0.1: {}
+
+  everystate@0.4.1: {}
 
   execa@5.1.1:
     dependencies:
