@@ -46,6 +46,7 @@ export class ApplicationDO extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att) continue;
+      if (!this.appId && att.appId) this.appId = att.appId;
       const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs) };
       this.conns.set(att.connId, state);
       for (const ch of att.subs) {

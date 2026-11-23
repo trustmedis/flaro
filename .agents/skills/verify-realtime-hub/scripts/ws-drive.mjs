@@ -24,6 +24,7 @@
 // Exit 0 iff every expectation held. Requires Node >= 22 (native WebSocket + fetch).
 
 import { readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 
 const argv = process.argv.slice(2);
 let planArg = null;
@@ -45,12 +46,14 @@ const waiters = [];       // pending frame predicates
 let reqCounter = 0;
 let ws = null;
 let runError = null;
+let lastConnId = null;
 
 const log = (...a) => console.log(...a);
 const send = (obj) => { log('>>', JSON.stringify(obj)); ws.send(JSON.stringify(obj)); };
 
 function dispatch(frame) {
   log('<<', JSON.stringify(frame));
+  if (frame.type === 'connection.ready') lastConnId = frame.connectionId;
   if (frame.type === 'event') {
     seen.push({ seq: seen.length, channel: frame.channel, event: frame.event, consumed: false });
   }
@@ -102,7 +105,12 @@ async function connect() {
 async function stepSubscribe(step) {
   const expectFail = step.expect === 'fail' || step.op === 'subscribeFail';
   const requestId = `req_${++reqCounter}`;
-  send({ type: 'subscribe', requestId, channel: step.channel });
+  const msg = { type: 'subscribe', requestId, channel: step.channel };
+  if (step.hmacSecret && lastConnId) {
+    const sig = createHmac('sha256', step.hmacSecret).update(`${lastConnId}:${step.channel}`).digest('hex');
+    msg.auth = `key:${sig}`;
+  }
+  send(msg);
   const ack = await waitFor(
     f => (f.type === 'subscription.succeeded' || f.type === 'subscription.failed') &&
          (f.requestId === requestId || (f.requestId === undefined && f.channel === step.channel)),
