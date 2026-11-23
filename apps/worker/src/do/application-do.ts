@@ -12,6 +12,9 @@ interface Attachment {
   sub: string;
   mode?: 'pusher';
   members?: Record<string, { id: string; info: unknown }>;
+  connectedAt?: number;
+  host?: string;
+  userAgent?: string;
 }
 
 function isAttachment(value: unknown): value is Attachment {
@@ -36,7 +39,16 @@ interface ConnState {
   subs: Set<string>;
   mode: 'rth' | 'pusher';
   lastOp: Map<string, 'sub' | 'unsub'>;
+  connectedAt: number;
+  host: string;
+  userAgent: string;
   members?: Map<string, { id: string; info: unknown }>;
+}
+
+function clientHost(request: Request): string {
+  return request.headers.get('cf-connecting-ip')
+    ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? '';
 }
 
 interface PresenceMember {
@@ -60,6 +72,19 @@ function minuteBuckets(timestamps: Array<number>, now: number): Array<number> {
   return buckets;
 }
 
+interface TimedCount { t: number; n: number }
+
+function minuteSums(entries: Array<TimedCount>, now: number): Array<number> {
+  const buckets = new Array<number>(TIMELINE_MINUTES).fill(0);
+  for (const e of entries) {
+    const idx = Math.floor((now - e.t) / 60_000);
+    if (idx >= 0 && idx < TIMELINE_MINUTES) {
+      buckets[TIMELINE_MINUTES - 1 - idx] = (buckets[TIMELINE_MINUTES - 1 - idx] ?? 0) + e.n;
+    }
+  }
+  return buckets;
+}
+
 export class ApplicationDO extends DurableObject<Env> {
   private indexBuilt = false;
   private conns = new Map<string, ConnState>();
@@ -67,6 +92,16 @@ export class ApplicationDO extends DurableObject<Env> {
   private presenceIndex = new Map<string, Map<string, PresenceMember>>();
   private publishWindow: Array<number> = [];
   private connectWindow: Array<number> = [];
+  private disconnectWindow: Array<number> = [];
+  private subscribeWindow: Array<number> = [];
+  private bytesIn: Array<TimedCount> = [];
+  private bytesOut: Array<TimedCount> = [];
+  private deliveredWindow: Array<TimedCount> = [];
+
+  private send(ws: WebSocket, payload: string): void {
+    this.bytesOut.push({ t: Date.now(), n: payload.length });
+    ws.send(payload);
+  }
 
   private connIdFor(ws: WebSocket): string {
     return readAttachment(ws)?.connId ?? '';
@@ -82,7 +117,10 @@ export class ApplicationDO extends DurableObject<Env> {
       const att = readAttachment(ws);
       if (!att) {continue;}
       if (!this.appId && att.appId) {this.appId = att.appId;}
-      const state: ConnState = { ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth', lastOp: new Map() };
+      const state: ConnState = {
+        ws, connId: att.connId, subs: new Set(att.subs), mode: att.mode ?? 'rth', lastOp: new Map(),
+        connectedAt: att.connectedAt ?? 0, host: att.host ?? '', userAgent: att.userAgent ?? '',
+      };
       if (att.members) {state.members = new Map(Object.entries(att.members));}
       this.conns.set(att.connId, state);
       for (const ch of att.subs) {
@@ -116,6 +154,7 @@ export class ApplicationDO extends DurableObject<Env> {
   private persistAttachment(state: ConnState, allowed: Array<string>, sub: string, appId?: string): void {
     const att: Attachment = {
       v: 1, connId: state.connId, appId: appId ?? this.appId ?? '', subs: [...state.subs], allowed, sub,
+      connectedAt: state.connectedAt, host: state.host, userAgent: state.userAgent,
     };
     if (state.mode === 'pusher') {att.mode = 'pusher';}
     if (state.members?.size) {att.members = Object.fromEntries(state.members);}
@@ -145,13 +184,16 @@ export class ApplicationDO extends DurableObject<Env> {
         const r = crypto.getRandomValues(new Uint32Array(2));
         connId = `${r[0]}.${r[1]}`;
       } while (this.conns.has(connId));
-      const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'pusher', lastOp: new Map() };
+      const state: ConnState = {
+        ws: server, connId, subs: new Set(), mode: 'pusher', lastOp: new Map(),
+        connectedAt: Date.now(), host: clientHost(request), userAgent: request.headers.get('user-agent') ?? '',
+      };
       this.conns.set(connId, state);
       this.connectWindow.push(Date.now());
       this.indexBuilt = true;
       this.appId = appId;
       this.persistAttachment(state, [], '', appId);
-      server.send(JSON.stringify({ event: 'pusher:connection_established', data: JSON.stringify({ socket_id: connId, activity_timeout: 120 }) }));
+      this.send(server, JSON.stringify({ event: 'pusher:connection_established', data: JSON.stringify({ socket_id: connId, activity_timeout: 120 }) }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -165,14 +207,17 @@ export class ApplicationDO extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
 
     const connId = `conn_${crypto.randomUUID()}`;
-    const state: ConnState = { ws: server, connId, subs: new Set(), mode: 'rth', lastOp: new Map() };
+    const state: ConnState = {
+      ws: server, connId, subs: new Set(), mode: 'rth', lastOp: new Map(),
+      connectedAt: Date.now(), host: clientHost(request), userAgent: request.headers.get('user-agent') ?? '',
+    };
     this.conns.set(connId, state);
     this.connectWindow.push(Date.now());
     this.indexBuilt = true;
     this.appId = parsed.data.appId;
     this.persistAttachment(state, parsed.data.channels, parsed.data.sub, parsed.data.appId);
 
-    server.send(JSON.stringify({
+    this.send(server, JSON.stringify({
       type: 'connection.ready',
       connectionId: connId,
       protocol: PROTOCOL_VERSION,
@@ -182,8 +227,9 @@ export class ApplicationDO extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     this.ensureIndex();
+    this.bytesIn.push({ t: Date.now(), n: typeof message === 'string' ? message.length : message.byteLength });
     if (typeof message !== 'string') {
-      ws.send(JSON.stringify({ type: 'connection.error', error: { code: 'invalid_message', message: 'text frames only' } }));
+      this.send(ws, JSON.stringify({ type: 'connection.error', error: { code: 'invalid_message', message: 'text frames only' } }));
       return;
     }
     const connId = this.connIdFor(ws);
@@ -193,12 +239,12 @@ export class ApplicationDO extends DurableObject<Env> {
 
     let raw: unknown;
     try { raw = JSON.parse(message); } catch {
-      ws.send(JSON.stringify({ type: 'connection.error', error: { code: 'invalid_json', message: 'frame is not JSON' } }));
+      this.send(ws, JSON.stringify({ type: 'connection.error', error: { code: 'invalid_json', message: 'frame is not JSON' } }));
       return;
     }
     const parsed = clientMessage.safeParse(raw);
     if (!parsed.success) {
-      ws.send(JSON.stringify({ type: 'connection.error', error: { code: 'invalid_message', message: 'unrecognized message' } }));
+      this.send(ws, JSON.stringify({ type: 'connection.error', error: { code: 'invalid_message', message: 'unrecognized message' } }));
       return;
     }
     const msg = parsed.data;
@@ -208,11 +254,11 @@ export class ApplicationDO extends DurableObject<Env> {
   }
 
   private pusherError(state: ConnState, message: string): void {
-    state.ws.send(JSON.stringify({ event: 'pusher:error', data: JSON.stringify({ code: null, message }) }));
+    this.send(state.ws, JSON.stringify({ event: 'pusher:error', data: JSON.stringify({ code: null, message }) }));
   }
 
   private pusherSubscriptionError(state: ConnState, channel: string, message: string, status = 403): void {
-    state.ws.send(JSON.stringify({
+    this.send(state.ws, JSON.stringify({
       event: 'pusher:subscription_error',
       channel,
       data: JSON.stringify({ type: 'AuthError', error: message, status }),
@@ -239,7 +285,7 @@ export class ApplicationDO extends DurableObject<Env> {
     if (typeof event !== 'string') {return this.pusherError(state, 'missing event');}
 
     if (event === 'pusher:ping') {
-      state.ws.send(JSON.stringify({ event: 'pusher:pong', data: '{}' }));
+      this.send(state.ws, JSON.stringify({ event: 'pusher:pong', data: '{}' }));
       return;
     }
     if (event === 'pusher:unsubscribe') {
@@ -264,7 +310,7 @@ export class ApplicationDO extends DurableObject<Env> {
       state.lastOp.set(channel, 'sub');
 
       if (state.subs.has(channel)) {
-        return state.ws.send(this.subscriptionSucceededFrame(state, channel));
+        return this.send(state.ws, this.subscriptionSucceededFrame(state, channel));
       }
       const isPresence = channel.startsWith('presence-');
       if (isPusherPrivateChannel(channel)) {
@@ -288,13 +334,14 @@ export class ApplicationDO extends DurableObject<Env> {
         return this.pusherError(state, 'too many subscriptions');
       }
       state.subs.add(channel);
+      this.subscribeWindow.push(Date.now());
       let set = this.channelIndex.get(channel);
       if (!set) {this.channelIndex.set(channel, (set = new Set<string>()));}
       set.add(state.connId);
       if (member) {this.addPresenceMember(state, channel, member);}
       const att = readAttachment(state.ws);
       this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
-      state.ws.send(this.subscriptionSucceededFrame(state, channel));
+      this.send(state.ws, this.subscriptionSucceededFrame(state, channel));
       return;
     }
     if (event.startsWith('client-')) {
@@ -309,7 +356,7 @@ export class ApplicationDO extends DurableObject<Env> {
             if (id === state.connId) {continue;}
             const t = this.conns.get(id);
             if (!t) { targets.delete(id); continue; }
-            try { t.ws.send(frame); } catch { this.dropConnection(t); }
+            try { this.send(t.ws, frame); } catch { this.dropConnection(t); }
           }
         }
       }
@@ -344,7 +391,7 @@ export class ApplicationDO extends DurableObject<Env> {
       if (id === state.connId) {continue;}
       const t = this.conns.get(id);
       if (!t) {continue;}
-      try { t.ws.send(frame); } catch { this.dropConnection(t); }
+      try { this.send(t.ws, frame); } catch { this.dropConnection(t); }
     }
   }
 
@@ -363,13 +410,13 @@ export class ApplicationDO extends DurableObject<Env> {
     for (const id of this.channelIndex.get(channel) ?? []) {
       const t = this.conns.get(id);
       if (!t) {continue;}
-      try { t.ws.send(frame); } catch { this.dropConnection(t); }
+      try { this.send(t.ws, frame); } catch { this.dropConnection(t); }
     }
   }
 
   private async handleSubscribe(state: ConnState, channel: string, requestId: string, auth?: string): Promise<void> {
     const fail = (code: string, message: string) =>
-      state.ws.send(JSON.stringify({
+      this.send(state.ws, JSON.stringify({
         type: 'subscription.failed', requestId, channel,
         error: { code, message },
       }));
@@ -395,18 +442,19 @@ export class ApplicationDO extends DurableObject<Env> {
       }
     }
     if (state.subs.has(channel)) {
-      state.ws.send(JSON.stringify({ type: 'subscription.succeeded', requestId, channel }));
+      this.send(state.ws, JSON.stringify({ type: 'subscription.succeeded', requestId, channel }));
       return;
     }
     if (state.subs.size >= MAX_SUBSCRIPTIONS_PER_CONNECTION) {return fail('limit', 'too many subscriptions');}
 
     state.subs.add(channel);
+    this.subscribeWindow.push(Date.now());
     let set = this.channelIndex.get(channel);
     if (!set) {this.channelIndex.set(channel, (set = new Set<string>()));}
     set.add(state.connId);
     const att = readAttachment(state.ws);
     this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
-    state.ws.send(JSON.stringify({ type: 'subscription.succeeded', requestId, channel }));
+    this.send(state.ws, JSON.stringify({ type: 'subscription.succeeded', requestId, channel }));
   }
 
   private handleUnsubscribe(state: ConnState, channel: string, requestId: string): void {
@@ -415,7 +463,7 @@ export class ApplicationDO extends DurableObject<Env> {
     this.channelIndex.get(channel)?.delete(state.connId);
     const att = readAttachment(state.ws);
     this.persistAttachment(state, att?.allowed ?? [], att?.sub ?? '');
-    state.ws.send(JSON.stringify({ type: 'subscription.succeeded', requestId, channel, op: 'unsubscribe' }));
+    this.send(state.ws, JSON.stringify({ type: 'subscription.succeeded', requestId, channel, op: 'unsubscribe' }));
   }
 
   async publishEvent(channel: string, event: string, data: unknown, excludeConnId?: string): Promise<{ eventId: string; delivered: number }> {
@@ -426,6 +474,7 @@ export class ApplicationDO extends DurableObject<Env> {
       throw new Error('rate_limited');
     }
     this.publishWindow.push(now);
+    this.bytesIn.push({ t: now, n: JSON.stringify(data).length });
 
     const eventId = `evt_${crypto.randomUUID()}`;
     const rthFrame = JSON.stringify({ type: 'event', eventId, channel, event, data });
@@ -438,13 +487,14 @@ export class ApplicationDO extends DurableObject<Env> {
         const state = this.conns.get(connId);
         if (!state) { targets.delete(connId); continue; }
         try {
-          state.ws.send(state.mode === 'pusher' ? pusherEventFrame : rthFrame);
+          this.send(state.ws, state.mode === 'pusher' ? pusherEventFrame : rthFrame);
           delivered++;
         } catch {
           this.dropConnection(state);
         }
       }
     }
+    this.deliveredWindow.push({ t: now, n: delivered });
     return { eventId, delivered };
   }
 
@@ -456,13 +506,22 @@ export class ApplicationDO extends DurableObject<Env> {
   }
 
   async stats(): Promise<{
+    bandwidthInTimeline: Array<number>; bandwidthOutTimeline: Array<number>;
     channels: number; connections: number; connectionsTimeline: Array<number>;
-    eventsPerMinute: number; eventsTimeline: Array<number>; presenceMembers: number; subscribers: number;
+    deliveredTimeline: Array<number>; disconnectionsTimeline: Array<number>;
+    eventsPerMinute: number; eventsTimeline: Array<number>; presenceMembers: number;
+    subscribers: number; subscriptionsTimeline: Array<number>;
   }> {
     this.ensureIndex();
     const now = Date.now();
-    this.publishWindow = this.publishWindow.filter((t) => now - t < TIMELINE_WINDOW_MS);
-    this.connectWindow = this.connectWindow.filter((t) => now - t < TIMELINE_WINDOW_MS);
+    const fresh = (e: { t: number } | number): boolean => now - (typeof e === 'number' ? e : e.t) < TIMELINE_WINDOW_MS;
+    this.publishWindow = this.publishWindow.filter(fresh);
+    this.connectWindow = this.connectWindow.filter(fresh);
+    this.disconnectWindow = this.disconnectWindow.filter(fresh);
+    this.subscribeWindow = this.subscribeWindow.filter(fresh);
+    this.bytesIn = this.bytesIn.filter(fresh);
+    this.bytesOut = this.bytesOut.filter(fresh);
+    this.deliveredWindow = this.deliveredWindow.filter(fresh);
     let subscribers = 0;
     for (const set of this.channelIndex.values()) {subscribers += set.size;}
     let presenceMembers = 0;
@@ -470,14 +529,35 @@ export class ApplicationDO extends DurableObject<Env> {
     const eventsTimeline = minuteBuckets(this.publishWindow, now);
     const connectionsTimeline = minuteBuckets(this.connectWindow, now);
     return {
+      bandwidthInTimeline: minuteSums(this.bytesIn, now),
+      bandwidthOutTimeline: minuteSums(this.bytesOut, now),
       channels: this.channelIndex.size,
       connections: this.conns.size,
       connectionsTimeline,
+      deliveredTimeline: minuteSums(this.deliveredWindow, now),
+      disconnectionsTimeline: minuteBuckets(this.disconnectWindow, now),
       eventsPerMinute: eventsTimeline[TIMELINE_MINUTES - 1] ?? 0,
       eventsTimeline,
       presenceMembers,
       subscribers,
+      subscriptionsTimeline: minuteBuckets(this.subscribeWindow, now),
     };
+  }
+
+  async connections(): Promise<Array<{
+    channels: Array<string>; connId: string; connectedAt: number;
+    host: string; mode: string; sub: string; userAgent: string;
+  }>> {
+    this.ensureIndex();
+    return [...this.conns.values()].map((state) => ({
+      channels: [...state.subs],
+      connId: state.connId,
+      connectedAt: state.connectedAt,
+      host: state.host,
+      mode: state.mode,
+      sub: readAttachment(state.ws)?.sub ?? '',
+      userAgent: state.userAgent,
+    }));
   }
 
   private dropConnection(state: ConnState): void {
@@ -486,7 +566,7 @@ export class ApplicationDO extends DurableObject<Env> {
       this.removePresenceMember(state, ch);
     }
     state.subs.clear();
-    this.conns.delete(state.connId);
+    if (this.conns.delete(state.connId)) {this.disconnectWindow.push(Date.now());}
     try { state.ws.close(1011, 'slow consumer'); } catch { /* already closed */ }
   }
 

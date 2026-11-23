@@ -44,6 +44,8 @@ async function requireAdmin(c: { req: { header: (k: string) => string | undefine
   throw new AuthError('forbidden', 'bad admin credentials', 403);
 }
 
+const zeroTimeline = () => new Array<number>(60).fill(0);
+
 export function registerAdminRoutes(app: Hono<AppEnv>) {
   const admin = new Hono<AppEnv>();
 
@@ -162,9 +164,11 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     }).from(applications);
     const apps = await Promise.all(rows.map(async (appRow) => {
       let live: {
+        bandwidthInTimeline: Array<number>; bandwidthOutTimeline: Array<number>;
         channels: number; connections: number; connectionsTimeline: Array<number>;
+        deliveredTimeline: Array<number>; disconnectionsTimeline: Array<number>;
         eventsPerMinute: number; eventsTimeline: Array<number>;
-        presenceMembers: number; subscribers: number;
+        presenceMembers: number; subscribers: number; subscriptionsTimeline: Array<number>;
       } | null;
       try {
         live = await c.env.APP_DO.get(c.env.APP_DO.idFromName(appRow.id)).stats();
@@ -172,17 +176,48 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
       return { ...appRow, live };
     }));
     const totals = apps.reduce((acc, appRow) => ({
+      bandwidthInTimeline: acc.bandwidthInTimeline.map((v, i) => v + (appRow.live?.bandwidthInTimeline[i] ?? 0)),
+      bandwidthOutTimeline: acc.bandwidthOutTimeline.map((v, i) => v + (appRow.live?.bandwidthOutTimeline[i] ?? 0)),
       channels: acc.channels + (appRow.live?.channels ?? 0),
       connections: acc.connections + (appRow.live?.connections ?? 0),
       connectionsTimeline: acc.connectionsTimeline.map((v, i) => v + (appRow.live?.connectionsTimeline[i] ?? 0)),
+      deliveredTimeline: acc.deliveredTimeline.map((v, i) => v + (appRow.live?.deliveredTimeline[i] ?? 0)),
+      disconnectionsTimeline: acc.disconnectionsTimeline.map((v, i) => v + (appRow.live?.disconnectionsTimeline[i] ?? 0)),
       eventsPerMinute: acc.eventsPerMinute + (appRow.live?.eventsPerMinute ?? 0),
       eventsTimeline: acc.eventsTimeline.map((v, i) => v + (appRow.live?.eventsTimeline[i] ?? 0)),
       subscribers: acc.subscribers + (appRow.live?.subscribers ?? 0),
+      subscriptionsTimeline: acc.subscriptionsTimeline.map((v, i) => v + (appRow.live?.subscriptionsTimeline[i] ?? 0)),
     }), {
-      channels: 0, connections: 0, connectionsTimeline: new Array<number>(60).fill(0),
-      eventsPerMinute: 0, eventsTimeline: new Array<number>(60).fill(0), subscribers: 0,
+      bandwidthInTimeline: zeroTimeline(), bandwidthOutTimeline: zeroTimeline(),
+      channels: 0, connections: 0, connectionsTimeline: zeroTimeline(),
+      deliveredTimeline: zeroTimeline(), disconnectionsTimeline: zeroTimeline(),
+      eventsPerMinute: 0, eventsTimeline: zeroTimeline(), subscribers: 0,
+      subscriptionsTimeline: zeroTimeline(),
     });
     return c.json({ apps, at: new Date().toISOString(), totals });
+  });
+
+  admin.get('/connections', async (c) => {
+    const db = drizzle(c.env.DB);
+    const rows = await db.select({
+      id: applications.id, name: applications.name, environment: applications.environment,
+      status: applications.status,
+    }).from(applications);
+    interface LiveConnection {
+      channels: Array<string>; connId: string; connectedAt: number;
+      host: string; mode: string; sub: string; userAgent: string;
+    }
+    const connections: Array<LiveConnection & { appId: string; appName: string; environment: string }> = [];
+    await Promise.all(rows.map(async (appRow) => {
+      try {
+        const list = await c.env.APP_DO.get(c.env.APP_DO.idFromName(appRow.id)).connections();
+        for (const conn of list) {
+          connections.push({ ...conn, appId: appRow.id, appName: appRow.name, environment: appRow.environment });
+        }
+      } catch { /* app has no live DO */ }
+    }));
+    connections.sort((a, b) => b.connectedAt - a.connectedAt);
+    return c.json({ at: new Date().toISOString(), connections });
   });
 
   admin.get('/audit', async (c) => {

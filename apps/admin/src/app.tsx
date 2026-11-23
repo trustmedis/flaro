@@ -3,6 +3,7 @@ import { SignInButton, useAuth, useUser } from '@clerk/clerk-react';
 import {
   GaugeIcon,
   KeyIcon,
+  LinkSimpleIcon,
   PlugsConnectedIcon,
   PulseIcon,
   RocketIcon,
@@ -47,6 +48,7 @@ import { toastManager } from '@/siteplane/components/toast';
 import { api, setTokenGetter } from './api';
 import type { AdminApp, AuditEntry } from './api';
 import { ApplicationsView } from './components/applications-view';
+import { ConnectionsView } from './components/connections-view';
 import { DashboardView } from './components/dashboard-view';
 import { AuditLogView } from './components/audit-log-view';
 import { MintTokenView } from './components/mint-token-view';
@@ -55,7 +57,7 @@ import { SecretDialog } from './components/secret-dialog';
 import type { SecretValue } from './components/secret-dialog';
 import { TestConsoleView } from './components/test-console-view';
 
-type View = 'dashboard' | 'applications' | 'mint' | 'console' | 'audit' | 'quickstart';
+type View = 'dashboard' | 'applications' | 'connections' | 'mint' | 'console' | 'audit' | 'quickstart';
 
 const NAV_GROUPS: Array<{ label: string; items: Array<{ id: View; label: string; icon: PhosphorIcon }> }> = [
   {
@@ -63,6 +65,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ id: View; label: string;
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: GaugeIcon },
       { id: 'applications', label: 'Applications', icon: SquaresFourIcon },
+      { id: 'connections', label: 'Connections', icon: LinkSimpleIcon },
       { id: 'audit', label: 'Audit log', icon: ScrollIcon },
     ],
   },
@@ -78,6 +81,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ id: View; label: string;
 
 const VIEW_TITLES: Record<View, string> = {
   applications: 'Applications',
+  connections: 'Connections',
   dashboard: 'Dashboard',
   mint: 'Mint token',
   console: 'Test console',
@@ -254,6 +258,7 @@ export default function App() {
                 run={run}
               />
             ) : null}
+            {view === 'connections' ? <ConnectionsView onError={notify.error} /> : null}
             {view === 'console' ? <TestConsoleView appId={activeAppId} /> : null}
             {view === 'audit' ? <AuditLogView audit={audit} /> : null}
             {view === 'quickstart' ? <QuickStartView appId={activeAppId} /> : null}
