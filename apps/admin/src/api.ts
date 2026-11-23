@@ -15,11 +15,8 @@ type TokenGetter = () => Promise<string | null>;
 let tokenGetter: TokenGetter | null = null;
 export const setTokenGetter = (g: TokenGetter | null) => { tokenGetter = g; };
 
-let manualToken = sessionStorage.getItem('rth_admin') ?? '';
-export const setManualToken = (t: string) => { manualToken = t; t ? sessionStorage.setItem('rth_admin', t) : sessionStorage.removeItem('rth_admin'); };
-
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = tokenGetter ? await tokenGetter() : manualToken;
+  const token = tokenGetter ? await tokenGetter() : null;
   const res = await fetch(`/admin${path}`, {
     ...init,
     headers: { authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json', ...(init?.headers ?? {}) },

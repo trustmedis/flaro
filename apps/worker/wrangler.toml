@@ -17,6 +17,10 @@ class_name = "ApplicationDO"
 tag = "v1"
 new_sqlite_classes = ["ApplicationDO"]
 
+routes = [
+  { pattern = "flaro.trustmedis.net", custom_domain = true }
+]
+
 [assets]
 directory = "../admin/dist"
 

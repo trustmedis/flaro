@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
 import { useAuth, useUser, SignInButton, SignOutButton } from '@clerk/clerk-react';
-import { api, setTokenGetter, setManualToken, mintSubscriberToken, type AdminApp, type Credential, type AuditEntry } from './api';
+import { api, setTokenGetter, mintSubscriberToken, type AdminApp, type Credential, type AuditEntry } from './api';
 
 function SecretDialog({ open, onClose, title, value }: { open: boolean; onClose: () => void; title: string; value: string }) {
   return (
@@ -27,10 +27,7 @@ function SecretDialog({ open, onClose, title, value }: { open: boolean; onClose:
 export default function App() {
   const { isSignedIn, getToken, signOut } = useAuth();
   const { user } = useUser();
-  const [manualAuthed, setManualAuthed] = useState(!!sessionStorage.getItem('rth_admin'));
-  const authed = isSignedIn || manualAuthed;
-  const [tokenInput, setTokenInput] = useState('');
-  const [showManual, setShowManual] = useState(false);
+  const authed = isSignedIn;
 
   useEffect(() => {
     if (!isSignedIn) { setTokenGetter(null); return; }
@@ -57,14 +54,9 @@ export default function App() {
   }, []);
   useEffect(() => { if (authed) void refresh(); }, [authed, refresh]);
 
-  async function login() {
-    setManualToken(tokenInput.trim());
-    try { await api('/apps'); setManualAuthed(true); }
-    catch { setManualToken(''); toast.error('Invalid credentials'); }
-  }
   function logout() {
     if (isSignedIn) { void signOut(); }
-    setManualToken(''); setManualAuthed(false); setDetail(null);
+    setDetail(null);
   }
   const run = (fn: () => Promise<void>) => { fn().then(refresh).catch((e) => toast.error(String(e))); };
 
@@ -80,17 +72,6 @@ export default function App() {
             Requires a Clerk token with an admin claim (JWT template
             <code> realtime-admin</code>, org role, or public_metadata.role).
           </p>
-          <Button variant="link" className="h-auto p-0 text-xs" onClick={() => setShowManual(!showManual)}>
-            use manual credential
-          </Button>
-          {showManual && (<>
-            <Label htmlFor="tok">ADMIN_SECRET / token</Label>
-            <Input id="tok" type="password" value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && login()} />
-            <Button className="w-full" variant="outline" onClick={login}>Sign in</Button>
-            <p className="text-xs text-muted-foreground">Stored in sessionStorage only.</p>
-          </>)}
         </CardContent>
       </Card>
       <Toaster />
@@ -103,9 +84,7 @@ export default function App() {
         <h1 className="text-2xl font-semibold">Realtime Hub Admin</h1>
         <div className="flex items-center gap-3">
           {isSignedIn && user && <span className="text-sm text-muted-foreground">{user.primaryEmailAddress?.emailAddress}</span>}
-          {isSignedIn
-            ? <SignOutButton><Button variant="outline">Sign out</Button></SignOutButton>
-            : <Button variant="outline" onClick={logout}>Sign out</Button>}
+          <SignOutButton><Button variant="outline">Sign out</Button></SignOutButton>
         </div>
       </div>
 
