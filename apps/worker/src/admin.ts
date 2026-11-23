@@ -136,6 +136,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
     const rows = await db.select().from(credentials).where(eq(credentials.keyId, keyId)).limit(1);
     const cred = rows[0];
     if (!cred || cred.applicationId !== id) return c.json({ error: { code: 'not_found', message: 'credential not found' } }, 404);
+    if (cred.status !== 'active') return c.json({ error: { code: 'already_revoked', message: 'credential already revoked' } }, 409);
     await db.update(credentials).set({ status: 'revoked', revokedAt: new Date() }).where(eq(credentials.keyId, keyId));
     await audit(db, c.get('actor'), 'credential.revoke', id, { keyId });
     return c.json({ keyId, status: 'revoked' });
