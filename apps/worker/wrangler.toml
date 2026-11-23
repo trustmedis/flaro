@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "realtime-hub"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "a3ee7ed0-685f-4bb2-926f-a85e8d2f2a58"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]

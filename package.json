@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "pnpm --filter @internal/worker dev",
-    "build": "pnpm -r build",
+    "build": "pnpm -r build && pnpm --filter @internal/worker db:migrate",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
   },
