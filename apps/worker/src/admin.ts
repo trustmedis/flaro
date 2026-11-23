@@ -36,7 +36,7 @@ async function requireAdmin(c: { req: { header: (k: string) => string | undefine
   if (!auth?.startsWith('Bearer ')) throw new AuthError('forbidden', 'missing credentials', 403);
   const token = auth.slice(7).trim();
   const secret = c.env.ADMIN_SECRET;
-  if (secret && token === secret) return c.req.header('x-admin-actor') ?? 'admin';
+  if (secret && token === secret) return `secret:${c.req.header('x-admin-actor') ?? 'admin'}`;
   if (token.split('.').length === 3) {
     const payload = await verifyClerkAdminToken(c.env, token);
     return `clerk:${payload.sub ?? 'unknown'}`;
