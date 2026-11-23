@@ -26,7 +26,7 @@ describe('ApplicationDO pusher protocol', () => {
 
     for (const conn of [a, b]) {
       const sig = await hmacHex(app.tokenSecret, `${conn.connId}:private-ch`);
-      conn.send({ event: 'pusher:subscribe', data: { channel: 'private-ch', auth: `key:${sig}` } });
+      conn.send({ event: 'pusher:subscribe', data: { channel: 'private-ch', auth: `${app.id}:${sig}` } });
     }
     expect((await a.next()).event).toBe('pusher_internal:subscription_succeeded');
     expect((await b.next()).event).toBe('pusher_internal:subscription_succeeded');
@@ -43,7 +43,7 @@ describe('ApplicationDO pusher protocol', () => {
     const a = await pusherConnect(app.id);
 
     const sig1 = await hmacHex(app.tokenSecret, `${a.connId}:private-rot`);
-    a.send({ event: 'pusher:subscribe', data: { channel: 'private-rot', auth: `key:${sig1}` } });
+    a.send({ event: 'pusher:subscribe', data: { channel: 'private-rot', auth: `${app.id}:${sig1}` } });
     expect((await a.next()).event).toBe('pusher_internal:subscription_succeeded');
 
     const rot = await adminFetch(`/admin/apps/${app.id}/token-secret`, { method: 'POST' });
@@ -51,7 +51,7 @@ describe('ApplicationDO pusher protocol', () => {
 
     const b = await pusherConnect(app.id); // same DO instance, ws1 still open
     const sig2 = await hmacHex(tokenSecret, `${b.connId}:private-rot2`);
-    b.send({ event: 'pusher:subscribe', data: { channel: 'private-rot2', auth: `key:${sig2}` } });
+    b.send({ event: 'pusher:subscribe', data: { channel: 'private-rot2', auth: `${app.id}:${sig2}` } });
     expect((await b.next()).event).toBe('pusher_internal:subscription_succeeded');
     a.ws.close();
     b.ws.close();

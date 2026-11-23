@@ -19,7 +19,7 @@ export function testApp(): TestApp {
 
 export function server(): PusherServer {
   const { appId, secret, port } = testApp();
-  return new PusherServer({ appId, key: appId, secret, host: '127.0.0.1', port, useTLS: false });
+  return new PusherServer({ appId, key: appId, secret, host: '127.0.0.1', port: String(port), useTLS: false });
 }
 
 // Mirrors integration_tests_server POST /auth: authorizeChannel with
@@ -81,7 +81,7 @@ const TEST_ADMIN_SECRET = (() => {
   try {
     const dv = readFileSync(path.join(import.meta.dirname, '..', '.dev.vars'), 'utf8');
     const m = dv.match(/^ADMIN_SECRET=(.+)$/m);
-    if (m) return m[1].trim();
+    if (m?.[1]) return m[1].trim();
   } catch { /* .dev.vars may not exist yet */ }
   return process.env.PUSHER_TEST_ADMIN_SECRET ?? 'pusher-compat-admin-secret';
 })();

@@ -26,6 +26,7 @@ export default async function setup() {
     'pnpm', ['exec', 'wrangler', 'dev', '--port', String(PORT), '--persist-to', persistDir],
     { cwd: workerDir, stdio: ['ignore', 'pipe', 'inherit'] },
   );
+  proc.stdout?.resume(); // drain stdout so a full pipe can't stall wrangler mid-boot
 
   const deadline = Date.now() + 60_000;
   for (;;) {
