@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+.env
 .verify-evidence/
 *.tsbuildinfo
 apps/worker/test/.test-app.json
