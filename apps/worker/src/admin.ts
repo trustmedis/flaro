@@ -176,17 +176,17 @@ export function registerAdminRoutes(app: Hono<AppEnv>) {
       return { ...appRow, live };
     }));
     const totals = apps.reduce((acc, appRow) => ({
-      bandwidthInTimeline: acc.bandwidthInTimeline.map((v, i) => v + (appRow.live?.bandwidthInTimeline[i] ?? 0)),
-      bandwidthOutTimeline: acc.bandwidthOutTimeline.map((v, i) => v + (appRow.live?.bandwidthOutTimeline[i] ?? 0)),
+      bandwidthInTimeline: acc.bandwidthInTimeline.map((v, i) => v + (appRow.live?.bandwidthInTimeline?.[i] ?? 0)),
+      bandwidthOutTimeline: acc.bandwidthOutTimeline.map((v, i) => v + (appRow.live?.bandwidthOutTimeline?.[i] ?? 0)),
       channels: acc.channels + (appRow.live?.channels ?? 0),
       connections: acc.connections + (appRow.live?.connections ?? 0),
-      connectionsTimeline: acc.connectionsTimeline.map((v, i) => v + (appRow.live?.connectionsTimeline[i] ?? 0)),
-      deliveredTimeline: acc.deliveredTimeline.map((v, i) => v + (appRow.live?.deliveredTimeline[i] ?? 0)),
-      disconnectionsTimeline: acc.disconnectionsTimeline.map((v, i) => v + (appRow.live?.disconnectionsTimeline[i] ?? 0)),
+      connectionsTimeline: acc.connectionsTimeline.map((v, i) => v + (appRow.live?.connectionsTimeline?.[i] ?? 0)),
+      deliveredTimeline: acc.deliveredTimeline.map((v, i) => v + (appRow.live?.deliveredTimeline?.[i] ?? 0)),
+      disconnectionsTimeline: acc.disconnectionsTimeline.map((v, i) => v + (appRow.live?.disconnectionsTimeline?.[i] ?? 0)),
       eventsPerMinute: acc.eventsPerMinute + (appRow.live?.eventsPerMinute ?? 0),
-      eventsTimeline: acc.eventsTimeline.map((v, i) => v + (appRow.live?.eventsTimeline[i] ?? 0)),
+      eventsTimeline: acc.eventsTimeline.map((v, i) => v + (appRow.live?.eventsTimeline?.[i] ?? 0)),
       subscribers: acc.subscribers + (appRow.live?.subscribers ?? 0),
-      subscriptionsTimeline: acc.subscriptionsTimeline.map((v, i) => v + (appRow.live?.subscriptionsTimeline[i] ?? 0)),
+      subscriptionsTimeline: acc.subscriptionsTimeline.map((v, i) => v + (appRow.live?.subscriptionsTimeline?.[i] ?? 0)),
     }), {
       bandwidthInTimeline: zeroTimeline(), bandwidthOutTimeline: zeroTimeline(),
       channels: 0, connections: 0, connectionsTimeline: zeroTimeline(),
