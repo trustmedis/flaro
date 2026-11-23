@@ -1,0 +1,21 @@
+name = "realtime-hub"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "realtime-hub"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "APP_DO"
+class_name = "ApplicationDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ApplicationDO"]
+
+[observability]
+enabled = true
