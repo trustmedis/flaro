@@ -102,10 +102,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isSignedIn) { setTokenGetter(null); return; }
-    setTokenGetter(async () => {
-      try { return (await getToken({ template: 'realtime-admin' })) ?? (await getToken()); }
-      catch { return await getToken(); }
-    });
+    setTokenGetter(getToken);
   }, [isSignedIn, getToken]);
 
   const [view, setView] = useState<View>('dashboard');
