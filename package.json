@@ -2,7 +2,6 @@
   "name": "realtime-hub",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "pnpm --filter @internal/worker dev",
     "build": "pnpm -r build && pnpm --filter @internal/worker db:migrate",

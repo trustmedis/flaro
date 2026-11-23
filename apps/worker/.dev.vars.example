@@ -1,0 +1,14 @@
+# Copy to apps/worker/.dev.vars — loaded by `wrangler dev` only (gitignored).
+# For deployed envs use `wrangler secret put <NAME>`; non-secret config lives
+# in wrangler.toml [vars].
+
+# Bearer token for /admin/* app-management routes.
+# Optional in code (Env.ADMIN_SECRET?), but required locally to call the admin
+# API without a Clerk JWT. Any strong random string.
+ADMIN_SECRET=
+
+# Clerk issuer used to verify admin JWTs via <issuer>/.well-known/jwks.json.
+# Optional: defaults to wrangler.toml [vars] CLERK_ISSUER (dev Clerk instance).
+# Set to http://127.0.0.1:8899 to verify against the local mock instead
+# (run `node clerk-mock.mjs` — it prints ADMIN_TOKEN and TOKEN for testing).
+CLERK_ISSUER=http://127.0.0.1:8899
